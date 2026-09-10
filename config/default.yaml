@@ -1,0 +1,54 @@
+provider: litellm
+
+models:
+  planner: anthropic/claude-3-5-sonnet-latest
+  coder: qwen/qwen-coder-plus
+  reviewer: deepseek/deepseek-chat
+  fallback: ollama/llama3.1
+
+# Automatic fallback chain, tried in order when a provider is unavailable.
+fallbackOrder:
+  - litellm
+  - anthropic
+  - openai
+  - openrouter
+  - groq
+  - deepseek
+  - qwen
+  - ollama
+
+auto:
+  mode: manual
+  workspaceOnly: true
+
+git:
+  enabled: true
+
+ui:
+  theme: dark
+  showActivity: true
+
+terminal:
+  commandTimeoutMs: 120000
+  maxOutputBytes: 65536
+  whitelist:
+    - npm test
+    - npm run build
+    - npm run lint
+    - npx tsc --noEmit
+    - pnpm test
+    - pnpm build
+    - yarn test
+
+agent:
+  maxIterations: 12
+  autoFix: true
+  runTestsOnChange: true
+
+# Provider overrides. Leave empty to use built-in defaults.
+providers: {}
+#   litellm:
+#     baseUrl: http://localhost:4000/v1
+#   ollama:
+#     baseUrl: http://localhost:11434
+#     model: llama3.1

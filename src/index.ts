@@ -1,0 +1,18 @@
+export { Agent } from './agent/Agent';
+export { PlanExecutor, parseActions } from './agent/executor';
+export { classifyError, extractTestSummary } from './agent/errors';
+export { Toolkit } from './agent/toolkit';
+export { Planner, parsePlanText, testCommandsFor } from './planner/Planner';
+export { Workspace, isWithin } from './workspace/Workspace';
+export { inspectProject } from './workspace/inspector';
+export { DiffEngine, diffEngine } from './diff/DiffEngine';
+export { CommandGuard } from './security/commandGuard';
+export { PermissionManager } from './security/permission';
+export { SecurityScanner, redactSecrets } from './security/scan';
+export { ModelRouter } from './router/ModelRouter';
+export { createProvider } from './llm/factory';
+export { PROVIDER_REGISTRY, isFreeProvider } from './llm/provider';
+export { SessionManager } from './sessions/SessionManager';
+export { GitManager } from './git/GitManager';
+export { loadConfig } from './config/schema';
+export * from './types';
