@@ -45,6 +45,30 @@ agent:
   autoFix: true
   runTestsOnChange: true
 
+sandbox:
+  enabled: true
+  cpuTimeLimitMs: 60000
+  maxOutputBytes: 65536  # mirrors terminal.maxOutputBytes
+
+vectorStore:
+  embeddingModel: local/minilm
+  chunkSize: 256
+  chunkOverlap: 32
+  maxFileSizeBytes: 1048576
+  topK: 5
+  indexDir: .luicode/vector-index
+  extensions:
+    - .ts
+    - .js
+    - .py
+    - .json
+    - .md
+    - .txt
+  excludeDirs:
+    - node_modules
+    - .git
+    - .luicode
+
 # Provider overrides. Leave empty to use built-in defaults.
 providers: {}
 #   litellm:

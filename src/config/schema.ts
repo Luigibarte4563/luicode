@@ -22,7 +22,22 @@ export const DEFAULT_CONFIG: LuicodeConfig = {
     whitelist: ['npm test', 'npm run build', 'npm run lint', 'npx tsc --noEmit', 'pnpm test', 'pnpm build', 'yarn test']
   },
   agent: { maxIterations: 12, autoFix: true, runTestsOnChange: true },
-  providers: {}
+  providers: {},
+  sandbox: {
+    enabled: true,
+    cpuTimeLimitMs: 60000,
+    maxOutputBytes: 65536   // mirrors terminal.maxOutputBytes
+  },
+  vectorStore: {
+    embeddingModel: 'local/minilm',
+    chunkSize: 256,
+    chunkOverlap: 32,
+    maxFileSizeBytes: 1048576,
+    topK: 5,
+    indexDir: '.luicode/vector-index',
+    extensions: ['.ts', '.js', '.py', '.json', '.md', '.txt'],
+    excludeDirs: ['node_modules', '.git', '.luicode']
+  }
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {

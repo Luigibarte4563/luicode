@@ -5,3 +5,5 @@ coverage/
 .luicode/
 .lui/
 .DS_Store
+.claude
+.kiro/

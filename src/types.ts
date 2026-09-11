@@ -42,6 +42,23 @@ export interface ProviderConfig {
   model?: string;
 }
 
+export interface SandboxConfig {
+  enabled: boolean;
+  cpuTimeLimitMs: number;
+  maxOutputBytes: number;
+}
+
+export interface VectorStoreConfig {
+  embeddingModel: string;
+  chunkSize: number;
+  chunkOverlap: number;
+  maxFileSizeBytes: number;
+  topK: number;
+  indexDir: string;
+  extensions: string[];
+  excludeDirs: string[];
+}
+
 export interface LuicodeConfig {
   provider: string;
   models: Partial<Record<TaskKind, string>>;
@@ -52,6 +69,8 @@ export interface LuicodeConfig {
   terminal: TerminalConfig;
   agent: AgentConfig;
   providers: Record<string, ProviderConfig>;
+  sandbox: SandboxConfig;
+  vectorStore: VectorStoreConfig;
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
@@ -163,6 +182,9 @@ export interface Session {
   errors: string[];
   finalSummary?: string;
   status: 'active' | 'done' | 'canceled';
+  workingMemoryPath?: string;
+  checkpoints: string[];
+  ragEnabled: boolean;
 }
 
 export type AgentEventType =
@@ -175,7 +197,9 @@ export type AgentEventType =
   | 'error'
   | 'file'
   | 'summary'
-  | 'approval';
+  | 'approval'
+  | 'thought'
+  | 'checkpoint';
 
 export interface AgentEvent {
   type: AgentEventType;
@@ -190,6 +214,8 @@ export interface AgentEvent {
   error?: Error;
   summary?: string;
   approved?: boolean;
+  checkpointSha?: string;
+  stepTitle?: string;
 }
 
 export type ApprovalKind = 'plan' | 'fileChanges' | 'command';

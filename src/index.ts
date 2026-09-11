@@ -2,6 +2,16 @@ export { Agent } from './agent/Agent';
 export { PlanExecutor, parseActions } from './agent/executor';
 export { classifyError, extractTestSummary } from './agent/errors';
 export { Toolkit } from './agent/toolkit';
+export { GeneratorAgent } from './agent/GeneratorAgent';
+export type {
+  GeneratorAgentOptions,
+  GeneratorResult,
+  GeneratorToolCall
+} from './agent/GeneratorAgent';
+export { classifyTask, buildSystemPrompt, BASE_PROMPT, TASK_PROMPTS } from './agent/taskRouter';
+export type { TaskType } from './agent/taskRouter';
+export { verifyOutput } from './agent/verifier';
+export type { VerificationResult } from './agent/verifier';
 export { Planner, parsePlanText, testCommandsFor } from './planner/Planner';
 export { Workspace, isWithin } from './workspace/Workspace';
 export { inspectProject } from './workspace/inspector';

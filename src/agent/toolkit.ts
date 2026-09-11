@@ -6,6 +6,7 @@ import { Tool, ToolRuntime } from '../tools/registry';
 import { fileTools } from '../tools/fileTools';
 import { shellTools } from '../tools/shellTools';
 import { gitTools } from '../tools/gitTools';
+import { astTools } from '../tools/astTools';
 import { GitManager } from '../git/GitManager';
 import { redactSecrets } from '../security/scan';
 
@@ -36,7 +37,7 @@ export class Toolkit implements ToolRuntime {
     if (opts.config.git.enabled) {
       for (const t of gitTools(this.git)) this.tools.set(t.name, t);
     }
-    for (const t of [...fileTools, ...shellTools]) this.tools.set(t.name, t);
+    for (const t of [...fileTools, ...shellTools, ...astTools]) this.tools.set(t.name, t);
   }
 
   setMode(mode: 'manual' | 'safe' | 'full'): void {

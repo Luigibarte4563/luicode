@@ -58,7 +58,9 @@ export class SessionManager {
       commands: [],
       testResults: [],
       errors: [],
-      status: 'active'
+      status: 'active',
+      checkpoints: [],
+      ragEnabled: false
     };
     return session;
   }

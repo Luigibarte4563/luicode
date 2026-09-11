@@ -24,6 +24,119 @@ Verify:
 luicode --version   # luicode v0.2.0
 ```
 
+## Setup
+
+After installing, point LUICode at an LLM provider by setting the appropriate
+environment variable and (optionally) creating a config file.
+
+### 1. Set your API key
+
+Export the key for whichever provider you want to use:
+
+```bash
+# Anthropic (Claude)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Google Gemini
+export GEMINI_API_KEY="..."
+
+# OpenRouter (access many models with one key)
+export OPENROUTER_API_KEY="..."
+
+# Groq
+export GROQ_API_KEY="..."
+
+# DeepSeek
+export DEEPSEEK_API_KEY="..."
+
+# Qwen / DashScope
+export DASHSCOPE_API_KEY="..."
+
+# Together AI
+export TOGETHER_API_KEY="..."
+
+# GitHub Models (free tier)
+export GITHUB_TOKEN="ghp_..."
+```
+
+For a fully local, free setup use **Ollama** — no key required. Install it from
+[ollama.com](https://ollama.com) and pull a model:
+
+```bash
+ollama pull llama3.1
+```
+
+### 2. Create a user config (recommended)
+
+Create `~/.luicode/config.yaml` (or `.json`) to set your preferred provider and
+models once, globally:
+
+```yaml
+# ~/.luicode/config.yaml
+
+provider: anthropic           # change to: openai | gemini | groq | ollama | …
+
+models:
+  planner:  anthropic/claude-3-5-sonnet-latest
+  coder:    anthropic/claude-3-5-sonnet-latest
+  reviewer: anthropic/claude-3-5-sonnet-latest
+
+auto:
+  mode: manual                # manual | safe | full
+```
+
+You can also create a per-project override at `<project>/.luicode/config.yaml`.
+Project settings take precedence over the global file, which takes precedence
+over the built-in defaults.
+
+### 3. Quick-start examples
+
+**Anthropic (Claude):**
+```yaml
+provider: anthropic
+models:
+  planner:  anthropic/claude-3-5-sonnet-latest
+  coder:    anthropic/claude-3-5-sonnet-latest
+  reviewer: anthropic/claude-3-5-sonnet-latest
+```
+
+**OpenAI:**
+```yaml
+provider: openai
+models:
+  planner:  openai/gpt-4o
+  coder:    openai/gpt-4o-mini
+  reviewer: openai/gpt-4o
+```
+
+**Fully local with Ollama (no API key):**
+```yaml
+provider: ollama
+models:
+  planner:  ollama/llama3.1
+  coder:    ollama/llama3.1
+  reviewer: ollama/llama3.1
+```
+
+**LiteLLM proxy (default):**
+The built-in default routes through a local LiteLLM proxy at
+`http://localhost:4000`. To use it, [run LiteLLM](https://docs.litellm.ai)
+locally and configure its backend separately.
+
+### 4. Verify setup
+
+```bash
+luicode --plan "list the files in this project"
+```
+
+LUICode will inspect the workspace and print a plan without making any changes.
+If it responds successfully, your provider and API key are configured correctly.
+
+---
+
 ## Usage
 
 ```bash
