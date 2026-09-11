@@ -4,6 +4,16 @@ import { Toolkit } from './toolkit';
 import { classifyError, extractTestSummary } from './errors';
 import { PlanEnvironment } from '../planner/Planner';
 
+function extractCommentary(text: string): { commentary: string; body: string } {
+  const startMatch = text.match(/---\s*commentary\s*---\s*\n?([\s\S]*?)\n?---\s*end\s*commentary\s*---/i);
+  if (!startMatch) return { commentary: '', body: text };
+  const commentary = startMatch[1].trim();
+  const body = text.slice(startMatch.index! + startMatch[0].length).trim();
+  return { commentary, body };
+}
+
+export { extractCommentary };
+
 export interface ParsedAction {
   kind: 'READ_FILE' | 'WRITE_FILE' | 'EDIT_FILE' | 'RUN_COMMAND' | 'SEARCH_CODE' | 'DONE' | 'ANALYSIS';
   file?: string;
@@ -85,6 +95,13 @@ export interface ExecutorResult {
 
 const EXEC_SYSTEM = `You are LUICode executing an approved plan step inside a workspace.
 
+First, write a brief natural-language explanation (1-3 sentences) of what you are about to do and why.
+Then emit ACTION blocks (one per action) followed by ACTION: DONE.
+
+--- commentary ---
+<your explanation here>
+--- end commentary ---
+
 Available actions (one per block):
 ACTION: READ_FILE
 FILE: <path>
@@ -134,6 +151,7 @@ export class PlanExecutor {
     const testResults: TestResult[] = [];
 
     for (const step of plan.steps) {
+      if (step.status === 'skipped') continue;
       step.status = 'running';
       this.toolkit.opts.emit({ type: 'plan', timestamp: Date.now(), plan, step });
       await this.runStep(plan, step.title, actions, changedFiles, testResults, maxIterations, env);
@@ -194,7 +212,11 @@ export class PlanExecutor {
     history.push({ role: 'user', content: `Recent actions performed:\n${lastFew.map((a) => `${a.kind} ${a.file ?? a.command ?? a.query ?? ''}`).join('\n') || '(none)'}\n\nReturn the next ACTION block now.` });
     try {
       const reply = await this.opts.router!.complete('coder', history);
-      return reply.content;
+      const { commentary, body } = extractCommentary(reply.content);
+      if (commentary) {
+        this.toolkit.opts.emit({ type: 'comment', timestamp: Date.now(), text: commentary });
+      }
+      return body;
     } catch {
       this.useLLM = false;
       return this.heuristicNextAction(planIntro);

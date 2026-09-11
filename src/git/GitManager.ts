@@ -65,6 +65,17 @@ export class GitManager {
     return rows;
   }
 
+  async numstatFor(file: string): Promise<{ add: number; del: number } | null> {
+    const out = await run(this.root, ['diff', '--numstat', '--', file]);
+    const m = out.match(/^(\d+|-)\s+(\d+|-)\s+\S+.*$/m);
+    if (!m) return null;
+    return { add: m[1] === '-' ? 0 : Number(m[1]), del: m[2] === '-' ? 0 : Number(m[2]) };
+  }
+
+  async unifiedFor(file: string): Promise<string> {
+    return run(this.root, ['diff', '--no-color', '--unified=2', '--', file]);
+  }
+
   async summary(): Promise<GitFileSummary> {
     const statusOut = await run(this.root, ['status', '--porcelain']);
     const modified: string[] = [];

@@ -1,4 +1,4 @@
-import { ChatOptions, LuicodeConfig, ModelMessage, ModelReply, ModelRouterLike, TaskKind } from '../types';
+import { ChatOptions, LuicodeConfig, ModelMessage, ModelReply, ModelRouterLike, ModelUsage, TaskKind } from '../types';
 import { createProvider } from '../llm/factory';
 import { LLMProvider } from '../llm/provider';
 import { DEFAULT_CONFIG } from '../config/schema';
@@ -20,6 +20,7 @@ function parseSpec(spec: string): { provider: string; model?: string } {
 
 export class ModelRouter implements ModelRouterLike {
   private providers: Map<string, LLMProvider> = new Map();
+  onUsage?: (usage: ModelUsage, task: TaskKind) => void;
 
   constructor(private config: LuicodeConfig) {}
 
@@ -54,7 +55,9 @@ export class ModelRouter implements ModelRouterLike {
     );
     if (primary.provider === 'mock' || this.config.provider === 'mock' || !order.length) {
       const mock = this.getProvider('mock');
-      return mock.chat(messages, options);
+      const reply = await mock.chat(messages, options);
+      this.onUsage?.(reply.usage ?? {}, task);
+      return reply;
     }
 
     let lastError: Error | undefined;
@@ -67,7 +70,9 @@ export class ModelRouter implements ModelRouterLike {
             : undefined;
       const provider = this.getProvider(name, model);
       try {
-        return await provider.chat(messages, options);
+        const reply = await provider.chat(messages, options);
+        this.onUsage?.(reply.usage ?? {}, task);
+        return reply;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         if (name === primary.provider) continue;

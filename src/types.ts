@@ -48,6 +48,17 @@ export interface SandboxConfig {
   maxOutputBytes: number;
 }
 
+export interface AdapterOverrideConfig {
+  install?: string;
+  installOne?: string;
+  test?: string;
+  build?: string;
+  scaffold?: string;
+  lockfile?: string;
+  verify?: string;
+  registry?: string;
+}
+
 export interface VectorStoreConfig {
   embeddingModel: string;
   chunkSize: number;
@@ -71,6 +82,7 @@ export interface LuicodeConfig {
   providers: Record<string, ProviderConfig>;
   sandbox: SandboxConfig;
   vectorStore: VectorStoreConfig;
+  adapters: Record<string, AdapterOverrideConfig>;
 }
 
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
@@ -113,12 +125,20 @@ export type PlanStatus =
   | 'implemented'
   | 'cancelled';
 
-export type StepStatus = 'pending' | 'running' | 'done' | 'failed';
+export type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+
+export type StepType = 'scaffold' | 'install' | 'edit' | 'run' | 'review';
+
+export type PlanTier = 'safe' | 'modify' | 'modify+network' | 'blocked';
 
 export interface PlanStep {
   id: string;
   title: string;
   status: StepStatus;
+  stepType?: StepType;
+  action?: string;
+  why?: string;
+  risk?: PlanTier;
 }
 
 export interface Plan {
@@ -152,12 +172,15 @@ export interface FileChange {
   action: 'create' | 'modify' | 'delete' | 'rename' | 'move';
 }
 
+export type CommandRisk = 'safe' | 'modify' | 'blocked';
+
 export interface CommandRecord {
   command: string;
   stdout: string;
   stderr: string;
   code: number | null;
   durationMs: number;
+  risk?: CommandRisk;
 }
 
 export interface TestResult {
@@ -190,12 +213,15 @@ export interface Session {
 export type AgentEventType =
   | 'status'
   | 'message'
+  | 'comment'
   | 'tool'
   | 'plan'
   | 'test'
   | 'command'
   | 'error'
   | 'file'
+  | 'diff'
+  | 'usage'
   | 'summary'
   | 'approval'
   | 'thought'
@@ -211,6 +237,8 @@ export interface AgentEvent {
   test?: TestResult;
   command?: CommandRecord;
   file?: FileChange;
+  diff?: DiffEntry;
+  usage?: ModelUsage;
   error?: Error;
   summary?: string;
   approved?: boolean;
@@ -225,6 +253,11 @@ export interface AskApproval {
   title: string;
   detail: string;
   items: string[];
+}
+
+export interface ApprovalDecision {
+  approved: boolean;
+  steps?: string[];
 }
 
 export interface ModelRouterLike {
@@ -247,6 +280,13 @@ export interface DiffResult {
   actions: DiffAction[];
   addedLines: string[];
   removedLines: string[];
+  additions: number;
+  deletions: number;
+}
+
+export interface DiffEntry {
+  path: string;
+  lines: string[];
   additions: number;
   deletions: number;
 }

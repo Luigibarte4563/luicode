@@ -1,6 +1,7 @@
 import * as path from 'path';
+import { CommandRisk } from '../types';
 
-export type CommandRisk = 'safe' | 'modify' | 'blocked';
+export type { CommandRisk };
 
 export interface CommandRiskResult {
   risk: CommandRisk;

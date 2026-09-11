@@ -2,17 +2,21 @@ import * as path from 'path';
 import {
   AgentEvent,
   AgentEventType,
+  ApprovalDecision,
   AskApproval,
   AutonomyLevel,
   ChatMessage,
+  DiffEntry,
+  FileChange,
   LuicodeConfig,
+  ModelUsage,
   Plan,
   Session,
   TestResult
 } from '../types';
 import { Workspace } from '../workspace/Workspace';
 import { inspectProject } from '../workspace/inspector';
-import { Planner } from '../planner/Planner';
+import { Planner, renderPlanMarkdown } from '../planner/Planner';
 import { ModelRouter } from '../router/ModelRouter';
 import { Toolkit } from './toolkit';
 import { PlanExecutor } from './executor';
@@ -30,7 +34,7 @@ export interface AgentDeps {
   sessions: SessionManager;
   session: Session;
   emit: (e: AgentEvent) => void;
-  askApproval: (q: AskApproval) => Promise<boolean>;
+  askApproval: (q: AskApproval) => Promise<ApprovalDecision>;
 }
 
 export interface AgentRunResult {
@@ -65,7 +69,8 @@ export class Agent {
       emit,
       askCommandApproval: async (command) => {
         const rec = { kind: 'command' as const, title: 'Run command', detail: command, items: [command] };
-        return deps.askApproval(rec);
+        const decision = await deps.askApproval(rec);
+        return decision.approved;
       }
     });
     this.planner = new Planner();
@@ -84,6 +89,22 @@ export class Agent {
     this.deps.emit({ type, timestamp: Date.now(), text, ...extra });
   }
 
+  private persistPlanMarkdown(plan: Plan): void {
+    try {
+      this.ws.writeFile('plan.md', renderPlanMarkdown(plan));
+      this.emit('file', undefined, { file: { path: 'plan.md', action: plan.status === 'rejected' ? 'modify' : 'create' } });
+    } catch {
+      // plan.md is a convenience artifact; never fail the run if it can't be written.
+    }
+  }
+
+  private routerFor(task: 'planner' | 'coder' | 'reviewer'): ModelRouter | null {
+    const router = this.deps.routerFor(task);
+    if (!router) return null;
+    router.onUsage = (usage: ModelUsage) => this.emit('usage', undefined, { usage });
+    return router;
+  }
+
   async runTask(task: string, opts?: { skipApproval?: boolean; planOnly?: boolean }): Promise<AgentRunResult> {
     this.session.task = task;
     this.session.status = 'active';
@@ -92,16 +113,19 @@ export class Agent {
     const profile = inspectProject(this.ws);
 
     this.emit('status', `Detected ${profile.language} / ${profile.framework} — preparing implementation plan…`);
-    const plannerRouter = this.deps.routerFor('planner');
+    const plannerRouter = this.routerFor('planner');
     const usePlannerLLM = plannerRouter !== null && !plannerRouter.isMock('planner');
     const plan = await this.planner.create({
       task,
       ws: this.ws,
       router: usePlannerLLM ? plannerRouter : null,
-      mode: this.mode
+      mode: this.mode,
+      adapters: this.config.adapters
     });
     this.session.plan = plan;
     this.emit('plan', 'Plan ready', { plan });
+    this.emit('comment', undefined, { text: plan.analysis });
+    this.persistPlanMarkdown(plan);
     this.deps.sessions.save(this.session);
 
     if (opts?.planOnly) {
@@ -115,24 +139,29 @@ export class Agent {
     const autoApprove =
       opts?.skipApproval === true || this.mode === 'full' || this.mode === 'safe';
     if (!autoApprove) {
-      const approved = await this.deps.askApproval({
+      const decision = await this.deps.askApproval({
         kind: 'plan',
         title: 'Implementation plan',
         detail: plan.analysis,
         items: plan.steps.map((s) => s.title)
       });
-      if (!approved) {
+      if (!decision.approved) {
         plan.status = 'rejected';
         this.session.status = 'canceled';
+        this.persistPlanMarkdown(plan);
         this.deps.sessions.save(this.session);
         this.emit('summary', 'Plan rejected — no files were modified.');
         return { changedFiles: [], testResults: [], summary: 'Plan rejected.', session: this.session, approvalDenied: true, plan };
       }
+      if (decision.steps && decision.steps.length) {
+        selectSteps(plan, decision.steps);
+      }
     }
     plan.status = 'approved';
+    this.persistPlanMarkdown(plan);
     this.deps.sessions.save(this.session);
 
-    const coderRouter = this.deps.routerFor('coder');
+    const coderRouter = this.routerFor('coder');
     const useLLM = coderRouter !== null && !coderRouter.isMock('coder');
     const executor = new PlanExecutor({
       toolkit: this.toolkit,
@@ -151,15 +180,18 @@ export class Agent {
       analysis: plan.analysis,
       filesToCreate: plan.filesToCreate,
       filesToModify: plan.filesToModify,
-      steps: plan.steps.map((s) => s.title),
+      steps: plan.steps.map((s) => ({ title: s.title, stepType: s.stepType, action: s.action, why: s.why, risk: s.risk })),
       tests: plan.tests,
       risk: plan.risk
     }, this.config.agent.maxIterations);
 
     this.session.actions = this.session.actions;
     plan.status = 'implemented';
+    this.persistPlanMarkdown(plan);
     this.session.testResults.push(...result.testResults);
     this.deps.sessions.save(this.session);
+
+    await this.emitDiffs(result.changedFiles, new Set(plan.filesToCreate));
 
     const failing = result.testResults.filter((t) => !t.passed);
     let finalTests: TestResult[] = result.testResults;
@@ -169,7 +201,8 @@ export class Agent {
 
     this.session.status = 'done';
     this.session.fileChanges = result.changedFiles.map((f) => ({ path: f, action: 'modify' }));
-    const summary = this.buildSummary(plan, finalTests, result.changedFiles.length);
+    const staticSummary = this.buildSummary(plan, finalTests, result.changedFiles.length);
+    const summary = await this.generateSummary(plan, finalTests, result.changedFiles.length, staticSummary);
     this.session.finalSummary = summary;
     this.deps.sessions.save(this.session);
     this.emit('summary', summary);
@@ -187,7 +220,7 @@ export class Agent {
     let lastOutput = failing.map((f) => f.output).join('\n') || failing.map((f) => f.summary).join('\n');
     while (current.length && iterations < maxIterations) {
       iterations++;
-      this.emit('status', `Diagnosing ${current.length} failing test run(s)…`);
+      this.emit('status', `Diagnosing ${current.length} failing test run(s)… (fix attempt ${iterations}/${maxIterations})`);
       const classified = classifyError(lastOutput);
       this.emit('error', `Failure detected: ${classified.message}${classified.file ? ` in ${classified.file}` : ''}`);
       this.session.errors.push(classified.message);
@@ -219,12 +252,11 @@ export class Agent {
       this.emit('status', 'No LLM configured for fixing; skipping automatic fix (offline).');
       return false;
     }
-    this.emit('status', 'Requesting code fix from model…');
     const messages = [
       {
         role: 'system' as const,
         content:
-          'You are LUICode fixing a failing build/test. Analyze the error and emit ACTION blocks (EDIT_FILE or WRITE_FILE) that resolve it. Finish with ACTION: DONE. If more info is needed, use READ_FILE first.'
+          'You are LUICode fixing a failing build/test. First, write a brief natural-language explanation of what went wrong and how you plan to fix it. Then emit ACTION blocks (EDIT_FILE or WRITE_FILE) that resolve the issue. Finish with ACTION: DONE.'
       },
       { role: 'user' as const, content: `FAILURE OUTPUT:\n${failureOutput.slice(0, 6000)}\n\nProject tree:\n${this.ws.tree('.', 3)}` }
     ];
@@ -236,8 +268,10 @@ export class Agent {
       this.emit('error', 'Fix LLM call failed');
       return false;
     }
+    const { commentary, body } = this.extractCommentary(reply);
+    if (commentary) this.emit('comment', undefined, { text: commentary });
     const { parseActions } = await import('./executor');
-    const actions = parseActions(reply).filter((a) => a.kind !== 'DONE');
+    const actions = parseActions(body).filter((a) => a.kind !== 'DONE');
     if (!actions.length) {
       this.emit('status', 'Model produced no actionable fix.');
       return false;
@@ -259,6 +293,14 @@ export class Agent {
     return true;
   }
 
+  private extractCommentary(text: string): { commentary: string; body: string } {
+    const startMatch = text.match(/---\s*commentary\s*---\s*\n?([\s\S]*?)\n?---\s*end\s*commentary\s*---/i);
+    if (!startMatch) return { commentary: '', body: text };
+    const commentary = startMatch[1].trim();
+    const body = text.slice(startMatch.index! + startMatch[0].length).trim();
+    return { commentary, body };
+  }
+
   private buildSummary(plan: Plan, tests: TestResult[], fileCount: number): string {
     const passed = tests.filter((t) => t.passed).length;
     const total = tests.length;
@@ -269,6 +311,34 @@ export class Agent {
       `Tests: ${passed}/${total} runs passed${total ? '' : ' (none configured — run "luicode test")'}`,
       `Mode: ${this.mode}`
     ].join('\n');
+  }
+
+  private async generateSummary(plan: Plan, tests: TestResult[], fileCount: number, fallback: string): Promise<string> {
+    const router = this.deps.routerFor('reviewer');
+    if (!router || router.isMock('reviewer')) return fallback;
+    const passing = tests.filter((t) => t.passed).length;
+    const files = this.session.fileChanges.map((f) => `${f.action} ${f.path}`).join('\n') || '(none)';
+    const testLines = tests.length
+      ? tests.map((t) => `${t.passed ? 'PASS' : 'FAIL'} ${t.command} — ${t.summary}`).join('\n')
+      : 'No tests were run.';
+    const failed = tests.filter((t) => !t.passed);
+    try {
+      const res = await router.complete('reviewer', [
+        {
+          role: 'system' as const,
+          content:
+            'You are LUICode writing the final summary for a completed task. Summarize what was done in 2-4 conversational sentences; do not use bullet lists, headings, or markdown headers.'
+        },
+        {
+          role: 'user' as const,
+          content: `Task: ${plan.task}\nSteps: ${plan.steps.map((s) => `${s.status === 'done' ? '[done]' : s.status === 'skipped' ? '[skipped]' : '[pending]'} ${s.title}`).join(' | ') || '(none)'}\nFiles changed:\n${files}\nTests (${passing}/${tests.length} passing):\n${testLines}\n${failed.length ? 'Remaining failures:\n' + failed.map((f) => `- ${f.command}: ${f.summary}`).join('\n') : ''}`
+        }
+      ]);
+      const text = res.content.trim();
+      return text.length > 0 ? text : fallback;
+    } catch {
+      return fallback;
+    }
   }
 
   async review(): Promise<string> {
@@ -319,6 +389,36 @@ export class Agent {
     this.session.messages.push(msg);
     this.deps.sessions.save(this.session);
   }
+
+  private async emitDiffs(files: string[], newFiles: Set<string>): Promise<void> {
+    for (const file of new Set(files)) {
+      const action = newFiles.has(file) ? 'create' : 'modify';
+      const entry = await this.computeDiffEntry(file, action);
+      if (entry) this.emit('diff', undefined, { diff: entry });
+    }
+  }
+
+  private async computeDiffEntry(file: string, action: FileChange['action']): Promise<DiffEntry | null> {
+    if (action === 'delete') {
+      return { path: file, lines: ['- (deleted)'], additions: 0, deletions: 0 };
+    }
+    const content = this.ws.readFileSafe(file);
+    if (content === null) return null;
+    if (await this.git.isRepo()) {
+      const numstat = await this.git.numstatFor(file);
+      const raw = await this.git.unifiedFor(file);
+      if (numstat) {
+        const lines = raw
+          .split('\n')
+          .filter((l) => l.startsWith('+') || l.startsWith('-'))
+          .slice(0, 200);
+        return { path: file, lines, additions: numstat.add, deletions: numstat.del };
+      }
+    }
+    const lines = content.split('\n').map((l) => `+ ${l}`);
+    const additions = content.split('\n').filter((l) => l.trim().length > 0).length;
+    return { path: file, lines: lines.slice(0, 200), additions, deletions: 0 };
+  }
 }
 
 export function openCwd(cwd: string): string {
@@ -337,4 +437,12 @@ export function renderPlanSummary(plan: Plan): string {
   lines.push(`TESTS: ${plan.tests.join('; ') || '—'}`);
   lines.push(`RISK: ${plan.risk}`);
   return lines.join('\n');
+}
+
+export function selectSteps(plan: Plan, selectedTitles: string[]): Plan {
+  const keep = new Set(selectedTitles.map((s) => s.trim().toLowerCase()).filter(Boolean));
+  for (const step of plan.steps) {
+    if (!keep.has(step.title.trim().toLowerCase())) step.status = 'skipped';
+  }
+  return plan;
 }

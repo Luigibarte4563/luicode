@@ -144,7 +144,7 @@ RISK: medium
 PLAN_END`;
     const env = parsePlanText(text);
     expect(env).not.toBeNull();
-    expect(env!.steps).toContain('Create login service');
+    expect(env!.steps.map((s) => s.title)).toContain('Create login service');
     expect(env!.filesToCreate).toEqual(['src/auth/login.ts']);
     expect(env!.tests).toEqual(['npm test']);
   });

@@ -55,14 +55,14 @@ export class Toolkit implements ToolRuntime {
   async runCommandTool(command: string, timeouts?: { timeoutMs?: number; maxOutputBytes?: number }): Promise<CommandRecord> {
     const verdict = this.guard.classify(command);
     if (verdict.risk === 'blocked') {
-      const rec: CommandRecord = { command, stdout: '', stderr: `BLOCKED: ${verdict.reason}`, code: 1, durationMs: 0 };
+      const rec: CommandRecord = { command, stdout: '', stderr: `BLOCKED: ${verdict.reason}`, code: 1, durationMs: 0, risk: 'blocked' };
       this.opts.emit({ type: 'command', timestamp: Date.now(), command: rec });
       return rec;
     }
     if (verdict.risk === 'modify') {
       const approved = await this.opts.askCommandApproval(command);
       if (!approved) {
-        const rec: CommandRecord = { command, stdout: '', stderr: 'Command rejected by user (needs approval).', code: null, durationMs: 0 };
+        const rec: CommandRecord = { command, stdout: '', stderr: 'Command rejected by user (needs approval).', code: null, durationMs: 0, risk: 'modify' };
         this.opts.emit({ type: 'command', timestamp: Date.now(), command: rec });
         return rec;
       }
@@ -73,6 +73,7 @@ export class Toolkit implements ToolRuntime {
       maxOutputBytes: timeouts?.maxOutputBytes ?? this.config.terminal.maxOutputBytes
     });
     const rec = await runner.run(command);
+    rec.risk = verdict.risk;
     this.opts.emit({ type: 'command', timestamp: Date.now(), command: rec });
     return rec;
   }

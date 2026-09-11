@@ -1,5 +1,5 @@
-export { Agent } from './agent/Agent';
-export { PlanExecutor, parseActions } from './agent/executor';
+export { Agent, renderPlanSummary, selectSteps } from './agent/Agent';
+export { PlanExecutor, parseActions, extractCommentary } from './agent/executor';
 export { classifyError, extractTestSummary } from './agent/errors';
 export { Toolkit } from './agent/toolkit';
 export { GeneratorAgent } from './agent/GeneratorAgent';
@@ -12,7 +12,15 @@ export { classifyTask, buildSystemPrompt, BASE_PROMPT, TASK_PROMPTS } from './ag
 export type { TaskType } from './agent/taskRouter';
 export { verifyOutput } from './agent/verifier';
 export type { VerificationResult } from './agent/verifier';
-export { Planner, parsePlanText, testCommandsFor } from './planner/Planner';
+export { Planner, parsePlanText, testCommandsFor, renderPlanMarkdown } from './planner/Planner';
+export {
+  ADAPTERS,
+  adapterNamed,
+  adapterForProfile,
+  resolveAdapters,
+  adaptersContext
+} from './planner/adapters';
+export type { Adapter } from './planner/adapters';
 export { Workspace, isWithin } from './workspace/Workspace';
 export { inspectProject } from './workspace/inspector';
 export { DiffEngine, diffEngine } from './diff/DiffEngine';

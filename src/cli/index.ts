@@ -58,7 +58,7 @@ USAGE
   luicode --auto                   Autonomous dev mode (safe permissions)
   luicode --auto=safe              Autonomous mode, safe permission level
   luicode --auto=full              Autonomous mode, full workspace autonomy
-  luicode --resume                 Resume the last interrupted session
+  luicode --resume                 Resume an interrupted session (picker when several exist)
   luicode --review                 Review working-tree changes + security scan
   luicode --version                Show version
   luicode --help                   Show this help
@@ -66,6 +66,7 @@ USAGE
 INTERACTIVE KEYBINDINGS
   Ctrl+C cancel/exit   Ctrl+L clear   Ctrl+P plan panel   Ctrl+D diff panel
   Ctrl+T terminal   Ctrl+A activity   Ctrl+O toggle auto   Esc exit
+  Plan approval: ↑/↓ move · Space toggle step · A all · Enter approve · N/Esc reject
 
 CONFIG
   ~/.luicode/config.yaml            User-level settings (models, providers)
@@ -88,6 +89,9 @@ function printEvent(e: AgentEvent): void {
       break;
     case 'message':
       process.stdout.write(`${e.text ?? ''}\n`);
+      break;
+    case 'comment':
+      if (e.text) process.stdout.write(`  › ${e.text}\n`);
       break;
     case 'tool':
       if (e.tool) process.stdout.write(`  ${e.tool.status === 'ok' ? '✓' : e.tool.status === 'error' ? '✗' : '●'} ${e.tool.name}\n`);
@@ -112,13 +116,37 @@ function printEvent(e: AgentEvent): void {
   }
 }
 
-function makeSession(sessions: SessionManager, task: string, mode: AutonomyLevel, resume: boolean) {
+function makeSession(sessions: SessionManager, task: string, mode: AutonomyLevel, resume: boolean, resumeId?: string) {
   if (resume) {
-    const s = sessions.latest();
+    const s = resumeId ? sessions.load(resumeId) : sessions.latest();
     if (s) return s;
     throw new Error('No previous session found to resume.');
   }
   return sessions.create(task, mode);
+}
+
+function formatTs(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+async function pickResumeSession(candidates: Array<{ file: string; id: string; updatedAt: number; task: string; status: string }>): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<string>((resolve) => {
+    process.stdout.write('\nInterrupted sessions:\n');
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      process.stdout.write(`  ${i + 1}) ${formatTs(c.updatedAt)}  ${c.task.slice(0, 50) || '(no task)'}  (${c.status})\n`);
+    }
+    const prompt = `Choose [1-${candidates.length}] (Enter = latest): `;
+    rl.question(prompt, (answer) => {
+      rl.close();
+      const n = parseInt(answer.trim(), 10);
+      if (n >= 1 && n <= candidates.length) resolve(candidates[n - 1].id);
+      else resolve(candidates[0].id);
+    });
+  });
 }
 
 async function runPlanOnly(cwd: string, config: LuicodeConfig, sessions: SessionManager, interactive: boolean, task: string): Promise<void> {
@@ -134,7 +162,7 @@ async function runPlanOnly(cwd: string, config: LuicodeConfig, sessions: Session
     sessions,
     session,
     emit: printEvent,
-    askApproval: () => Promise.resolve(true)
+    askApproval: () => Promise.resolve({ approved: true })
   });
   const result = await agent.runTask(task || 'Analyze this project and produce an implementation plan.', { planOnly: true });
   process.stdout.write('\n' + result.summary);
@@ -153,7 +181,7 @@ async function runReview(cwd: string, config: LuicodeConfig, sessions: SessionMa
     sessions,
     session,
     emit: printEvent,
-    askApproval: () => Promise.resolve(true)
+    askApproval: () => Promise.resolve({ approved: true })
   });
   const report = await agent.review();
   process.stdout.write('\n' + report + '\n');
@@ -171,17 +199,17 @@ async function runTaskOnce(cwd: string, config: LuicodeConfig, sessions: Session
     sessions,
     session,
     emit: printEvent,
-    askApproval: () => Promise.resolve(true)
+    askApproval: () => Promise.resolve({ approved: true })
   });
   await agent.runTask(task, { skipApproval: mode !== 'manual' });
 }
 
-async function runInteractive(cwd: string, config: LuicodeConfig, sessions: SessionManager, interactive: boolean, projectName: string, args: ParsedArgs): Promise<void> {
+async function runInteractive(cwd: string, config: LuicodeConfig, sessions: SessionManager, interactive: boolean, projectName: string, args: ParsedArgs, resumeId?: string): Promise<void> {
   const mode = resolveMode(args.mode);
   let modeRef: AutonomyLevel = mode;
   let session;
   try {
-    session = makeSession(sessions, args.task, mode, args.resume);
+    session = makeSession(sessions, args.task, mode, args.resume, resumeId);
   } catch (err) {
     process.stdout.write(`${err instanceof Error ? err.message : String(err)}\n`);
     return;
@@ -314,7 +342,15 @@ async function main(): Promise<void> {
     return;
   }
 
-  await runInteractive(cwd, config, sessions, interactive, projectName, args);
+  let selectedResumeId: string | undefined;
+  if (args.resume && interactive) {
+    const candidates = sessions.list().filter((s) => s.status !== 'done');
+    if (candidates.length > 1) {
+      selectedResumeId = await pickResumeSession(candidates);
+    }
+  }
+
+  await runInteractive(cwd, config, sessions, interactive, projectName, args, selectedResumeId);
 }
 
 if (require.main === module) {

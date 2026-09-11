@@ -37,7 +37,8 @@ export const DEFAULT_CONFIG: LuicodeConfig = {
     indexDir: '.luicode/vector-index',
     extensions: ['.ts', '.js', '.py', '.json', '.md', '.txt'],
     excludeDirs: ['node_modules', '.git', '.luicode']
-  }
+  },
+  adapters: {}
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {

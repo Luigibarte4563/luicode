@@ -1,5 +1,5 @@
 import * as readline from 'readline';
-import { AgentEvent, AskApproval, AutonomyLevel, LuicodeConfig, Session } from '../types';
+import { AgentEvent, ApprovalDecision, AskApproval, AutonomyLevel, CommandRisk, DiffEntry, LuicodeConfig, Session } from '../types';
 import { CLEAR_SCREEN, CURSOR_HOME, HIDE_CURSOR, RESET, SHOW_CURSOR, paint, wrapAnsi } from './ansi';
 
 export interface TuiOptions {
@@ -15,7 +15,10 @@ export interface TuiOptions {
 
 interface PendingApproval {
   q: AskApproval;
-  resolve: (ok: boolean) => void;
+  resolve: (d: ApprovalDecision) => void;
+  cursor: number;
+  selected: Set<number>;
+  checkbox: boolean;
 }
 
 type Panel = 'conversation' | 'plan' | 'diff' | 'activity' | 'terminal';
@@ -27,6 +30,9 @@ const RED: [number, number, number] = [255, 90, 90];
 const DIM: [number, number, number] = [110, 120, 130];
 const TEXT: [number, number, number] = [210, 218, 226];
 
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const SPINNER_INTERVAL_MS = 80;
+
 export class TerminalUI {
   private lines: Array<{ text: string; color?: string | [number, number, number]; prefix?: string }> = [];
   private input = '';
@@ -35,25 +41,34 @@ export class TerminalUI {
   private panels = new Set<Panel>(['conversation']);
   private activity: string[] = [];
   private busy = false;
-  private lastPlan: string[] = [];
-  private planApproved: string[] = [];
-  private lastDiff: string[] = [];
-  private commands: string[] = [];
+  private lastPlan: Array<{ label: string; skipped?: boolean }> = [];
+  private commands: Array<{ command: string; risk?: CommandRisk }> = [];
   private statusText = 'Ready';
   private stopped = false;
   private scheduled = false;
   private keyListenerSet = false;
   private mode: AutonomyLevel;
   private fileChanges: string[] = [];
+  private diffEntries: DiffEntry[] = [];
+  private tokens = { in: 0, out: 0 };
+  private spinnerFrame = 0;
+  private spinnerTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private opts: TuiOptions) {
     this.mode = opts.mode;
   }
 
-  getApproval = (q: AskApproval): Promise<boolean> => {
-    if (!this.opts.interactive) return Promise.resolve(true);
+  getApproval = (q: AskApproval): Promise<ApprovalDecision> => {
+    if (!this.opts.interactive) return Promise.resolve({ approved: true });
     return new Promise((resolve) => {
-      this.pendingApproval = { q, resolve };
+      const checkbox = q.kind === 'plan' && q.items.length > 1;
+      this.pendingApproval = {
+        q,
+        resolve,
+        cursor: 0,
+        selected: new Set(q.items.map((_, i) => i)),
+        checkbox
+      };
       this.render();
     });
   };
@@ -64,6 +79,13 @@ export class TerminalUI {
     this.lastPlan = [];
     this.commands = [];
     this.fileChanges = [];
+    this.diffEntries = [];
+    this.tokens = { in: 0, out: 0 };
+    if (!this.busy && this.spinnerTimer) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = null;
+      this.spinnerFrame = 0;
+    }
     this.render();
   }
 
@@ -81,6 +103,9 @@ export class TerminalUI {
       case 'message':
         this.addLine(e.text ?? '', TEXT, 'You');
         break;
+      case 'comment':
+        if (e.text) this.addLine(e.text, [150, 165, 185], 'ai');
+        break;
       case 'tool':
         if (e.tool) {
           const icon = e.tool.status === 'ok' ? '✓' : e.tool.status === 'error' ? '✗' : '●';
@@ -91,7 +116,10 @@ export class TerminalUI {
         break;
       case 'plan':
         if (e.plan) {
-          this.lastPlan = e.plan.steps.map((s) => `${s.status === 'done' ? '✓' : s.status === 'running' ? '●' : '○'} ${s.title}`);
+          this.lastPlan = e.plan.steps.map((s) => {
+            const tier = s.risk ? ` [${s.risk}]` : s.stepType ? ` [${s.stepType}]` : '';
+            return { label: `${stepIcon(s.status)} ${s.title}${tier}`, skipped: s.status === 'skipped' };
+          });
           this.statusText = `Plan / ${this.mode}`;
         }
         break;
@@ -103,10 +131,15 @@ export class TerminalUI {
         break;
       case 'command':
         if (e.command) {
-          this.commands.push(`$ ${e.command.command}`);
+          this.commands.push({ command: e.command.command, risk: e.command.risk });
           this.addLine(`$ ${e.command.command}`, ACCENT, '$');
           const out = e.command.stdout.slice(0, 200).trim();
           if (out) this.activity.push(out);
+          if (e.command.risk === 'blocked') {
+            this.addLine(`Blocked: ${e.command.stderr.replace(/^BLOCKED:\s*/, '')}`, RED, '!');
+          } else if (e.command.risk === 'modify') {
+            this.addLine(`Approved modify command: ${e.command.command}`, YELLOW, '!');
+          }
         }
         break;
       case 'error':
@@ -117,6 +150,19 @@ export class TerminalUI {
           const icon = e.file.action === 'create' ? '+' : '~';
           this.fileChanges.push(`${icon} ${e.file.path}`);
           this.addLine(`${icon} ${e.file.path}`, e.file.action === 'create' ? GREEN : ACCENT, icon);
+        }
+        break;
+      case 'diff':
+        if (e.diff) {
+          this.diffEntries.push(e.diff);
+          const { path: p, additions: a, deletions: d } = e.diff;
+          this.addLine(`Diff  ${p}  ${a > 0 || d > 0 ? `+${a} -${d}` : '(no changes)'}`, a > d ? GREEN : d > a ? RED : ACCENT, '±');
+        }
+        break;
+      case 'usage':
+        if (e.usage) {
+          this.tokens.in += e.usage.inputTokens ?? 0;
+          this.tokens.out += e.usage.outputTokens ?? 0;
         }
         break;
       case 'summary':
@@ -154,6 +200,10 @@ export class TerminalUI {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    if (this.spinnerTimer) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = null;
+    }
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     process.stdout.write(SHOW_CURSOR);
     try {
@@ -164,6 +214,10 @@ export class TerminalUI {
   }
 
   async shutdown(): Promise<void> {
+    if (this.spinnerTimer) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = null;
+    }
     this.stop();
   }
 
@@ -246,13 +300,51 @@ export class TerminalUI {
   private handleApprovalKey(key: readline.Key): void {
     if (!this.pendingApproval) return;
     const p = this.pendingApproval;
+
+    if (p.checkbox) {
+      if (key.name === 'up' || key.name === 'k') {
+        p.cursor = (p.cursor + p.q.items.length - 1) % p.q.items.length;
+        this.render();
+        return;
+      }
+      if (key.name === 'down' || key.name === 'j') {
+        p.cursor = (p.cursor + 1) % p.q.items.length;
+        this.render();
+        return;
+      }
+      if (key.name === 'space' || key.name === 'x') {
+        if (p.selected.has(p.cursor)) p.selected.delete(p.cursor);
+        else p.selected.add(p.cursor);
+        this.render();
+        return;
+      }
+      if (key.name === 'a') {
+        p.selected = new Set(p.q.items.map((_, i) => i));
+        this.render();
+        return;
+      }
+      if (key.name === 'return' || key.name === 'y' || key.name === 'n' || key.name === 'escape') {
+        const steps = [...p.selected].sort((a, b) => a - b).map((i) => p.q.items[i]);
+        const ok = (key.name === 'return' || key.name === 'y') && steps.length > 0;
+        this.pendingApproval = null;
+        this.addLine(
+          `[${ok ? 'Approved' : 'Rejected'}${p.q.kind === 'plan' && ok ? ` ${steps.length}/${p.q.items.length} steps` : ''}] ${p.q.title}`,
+          ok ? GREEN : RED,
+          ok ? '✓' : '✗'
+        );
+        this.render();
+        p.resolve(ok ? { approved: true, steps } : { approved: false });
+      }
+      return;
+    }
+
     const approve = key.name === 'y' || key.name === 'return';
     const reject = key.name === 'n' || key.name === 'escape';
     if (approve || reject) {
       this.pendingApproval = null;
       this.addLine(`[${approve ? 'Approved' : 'Rejected'}] ${p.q.title}`, approve ? GREEN : RED, approve ? '✓' : '✗');
       this.render();
-      p.resolve(approve);
+      p.resolve({ approved: approve });
     }
   }
 
@@ -264,6 +356,17 @@ export class TerminalUI {
   private render(): void {
     if (this.scheduled) return;
     this.scheduled = true;
+    if (this.busy && !this.spinnerTimer) {
+      this.spinnerTimer = setInterval(() => {
+        this.spinnerFrame++;
+        this.scheduled = false;
+        this.render();
+      }, SPINNER_INTERVAL_MS);
+    } else if (!this.busy && this.spinnerTimer) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = null;
+      this.spinnerFrame = 0;
+    }
     setImmediate(() => {
       this.scheduled = false;
       if (this.stopped) return;
@@ -276,7 +379,7 @@ export class TerminalUI {
     const height = process.stdout.rows || 30;
     let frame = CLEAR_SCREEN + CURSOR_HOME + HIDE_CURSOR;
     frame += this.header(width);
-    const contentHeight = Math.max(4, height - 4);
+    const contentHeight = Math.max(4, height - 5);
     const body = this.body(width, height - 2);
     const bodyLines = body.split('\n');
     frame += bodyLines.slice(0, contentHeight).join('\n');
@@ -301,12 +404,22 @@ export class TerminalUI {
     };
     if (this.panels.has('plan') && this.lastPlan.length) {
       push(paint('PLAN', ACCENT, 'bold'));
-      for (const l of this.lastPlan) push(paint(`  ${l}`, TEXT));
+      for (const l of this.lastPlan) push(paint(`  ${l.label}`, l.skipped ? DIM : TEXT));
       push('');
     }
     if (this.panels.has('terminal') && this.commands.length) {
       push(paint('TERMINAL', ACCENT, 'bold'));
-      for (const l of this.commands.slice(-8)) push(paint(`  ${l}`, [120, 220, 160]));
+      for (const c of this.commands.slice(-8)) {
+        const badge =
+          c.risk === 'safe'
+            ? paint('SAFE', GREEN, 'bold')
+            : c.risk === 'modify'
+              ? paint('MODIFY', YELLOW, 'bold')
+              : c.risk === 'blocked'
+                ? paint('BLOCKED', RED, 'bold')
+                : paint('RUN', DIM);
+        push(`${badge}${paint(` $ ${c.command}`, [120, 220, 160])}`);
+      }
       push('');
     }
     if (this.panels.has('activity') && this.activity.length) {
@@ -314,10 +427,17 @@ export class TerminalUI {
       for (const l of this.activity.slice(-8)) push(paint(`  ${l}`, DIM));
       push('');
     }
-    if (this.panels.has('diff') && this.lastDiff.length) {
-      push(paint('DIFF', ACCENT, 'bold'));
-      for (const l of this.lastDiff.slice(-20)) push(paint(`  ${l}`, l.startsWith('+') ? GREEN : l.startsWith('-') ? RED : TEXT));
-      push('');
+    if (this.panels.has('diff') && this.diffEntries.length) {
+      for (const d of this.diffEntries.slice(-6)) {
+        const net = d.additions - d.deletions;
+        const color = net > 0 ? GREEN : net < 0 ? RED : ACCENT;
+        const stats = paint(`+${d.additions} -${d.deletions}`, color, 'bold');
+        push(paint(`DIFF  ${d.path}  `, ACCENT, 'bold') + stats);
+        for (const l of d.lines.slice(-12)) {
+          push(paint(`   ${l}`, l.startsWith('++') || l.startsWith('--') ? DIM : l.startsWith('+') ? GREEN : l.startsWith('-') ? RED : TEXT));
+        }
+        push('');
+      }
     }
     if (this.fileChanges.length) {
       push(paint('CHANGES', GREEN, 'bold'));
@@ -329,7 +449,20 @@ export class TerminalUI {
       push(paint('Shortcuts: Ctrl+C cancel · Ctrl+P plan · Ctrl+D diff · Ctrl+T terminal · Ctrl+O auto', DIM));
     } else {
       for (const l of this.lines.slice(-Math.max(4, available - 4))) {
-        push(paint(l.text, l.color ?? TEXT, l.prefix === this.inputHeader ? 'bold' : undefined));
+        const style = l.prefix === this.inputHeader ? 'bold' : l.prefix === 'ai' ? 'italic' : undefined;
+        push(paint(l.prefix === 'ai' ? `  ${l.text}` : l.text, l.color ?? TEXT, style));
+      }
+    }
+    if (this.busy) {
+      const spinner = SPINNER_FRAMES[this.spinnerFrame % SPINNER_FRAMES.length];
+      push(paint(`  ${spinner} ${this.statusText}`, ACCENT));
+      const progress = parseProgress(this.statusText);
+      if (progress) {
+        const pct = Math.round((progress.current / progress.total) * 100);
+        const barW = Math.min(20, Math.max(4, Math.floor(width * 0.15)));
+        const filled = Math.round((pct / 100) * barW);
+        const bar = paint('░'.repeat(barW), DIM) + paint('█'.repeat(filled), ACCENT);
+        push(`  ${bar}  ${progress.current}/${progress.total}  ${pct}%`);
       }
     }
     if (this.pendingApproval) {
@@ -337,21 +470,73 @@ export class TerminalUI {
       push('');
       push(paint(`▍${q.title}`, YELLOW, 'bold'));
       push(paint(`  ${q.detail}`, DIM));
-      for (const item of q.items.slice(0, 12)) push(paint(`  · ${item}`, TEXT));
-      push(paint('  [Y] Approve   [N] Reject', GREEN, 'bold'));
+      if (this.pendingApproval.checkbox) {
+        for (let i = 0; i < q.items.slice(0, 12).length; i++) {
+          const item = q.items[i];
+          const sel = this.pendingApproval.selected.has(i);
+          const cursor = i === this.pendingApproval.cursor;
+          push(paint(`${cursor ? '▶' : ' '} ${sel ? '[x]' : '[ ]'} ${item}`, sel ? TEXT : DIM));
+        }
+        push(paint('  ↑/↓ move · Space toggle · A all · Enter approve · N/Esc reject', DIM));
+      } else {
+        for (const item of q.items.slice(0, 12)) push(paint(`  · ${item}`, TEXT));
+        push(paint('  [Y] Approve   [N] Reject', GREEN, 'bold'));
+      }
     }
     if (this.pendingApproval) push('');
     return lines.join('\n');
   }
 
+  private statusBar(width: number): string {
+    const models = this.opts.config.models ?? {};
+    const shortSpec = (s?: string): string => {
+      if (!s) return '—';
+      const base = s.includes('/') ? s.split('/').pop() as string : s;
+      return base.length > 16 ? base.slice(0, 15) + '…' : base;
+    };
+    const modeColor = this.mode === 'full' ? RED : this.mode === 'safe' ? YELLOW : GREEN;
+    const statusLabel = this.busy
+      ? ` ${SPINNER_FRAMES[this.spinnerFrame % SPINNER_FRAMES.length]} ${this.statusText.slice(0, 22)} `
+      : ` ${this.statusText.slice(0, 24)} `;
+    const left =
+      paint(statusLabel, this.busy ? ACCENT : DIM) +
+      paint(`mode:${this.mode}`, modeColor, 'bold') +
+      paint(` planner:${shortSpec(models.planner)} coder:${shortSpec(models.coder)} reviewer:${shortSpec(models.reviewer)}`, DIM) +
+      paint(` in:${this.tokens.in} out:${this.tokens.out}`, ACCENT);
+    const rawLen = left.replace(/\x1b\[[0-9;]*m/g, '').length;
+    return left + (rawLen < width ? ' '.repeat(width - rawLen) : '');
+  }
+
   private inputLine(width: number): string {
-    const status = paint(` ${this.statusText.slice(0, 26)} `, DIM);
+    const bar = this.statusBar(width);
     let prompt: string;
     if (this.pendingApproval) prompt = paint('LUICode awaiting decision…', YELLOW);
     else prompt = paint(`> ${this.input}`, TEXT);
-    const line = `${status} ${prompt}`;
-    return paint('─'.repeat(width), DIM) + '\n' + line;
+    return bar + '\n' + paint('─'.repeat(width), DIM) + '\n' + prompt;
   }
+}
+
+function stepIcon(status: string): string {
+  switch (status) {
+    case 'done':
+      return '✓';
+    case 'running':
+      return '●';
+    case 'failed':
+      return '✗';
+    case 'skipped':
+      return '×';
+    default:
+      return '○';
+  }
+}
+
+function parseProgress(text: string): { current: number; total: number } | null {
+  const m = text.match(/fix attempt\s+(\d+)\s*\/\s*(\d+)/i);
+  if (m) return { current: parseInt(m[1], 10), total: parseInt(m[2], 10) };
+  const m2 = text.match(/attempt\s+(\d+)\s*\/\s*(\d+)/i);
+  if (m2) return { current: parseInt(m2[1], 10), total: parseInt(m2[2], 10) };
+  return null;
 }
 
 function shortArgs(args: string): string {
