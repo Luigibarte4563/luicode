@@ -132,8 +132,9 @@ locally and configure its backend separately.
 luicode --plan "list the files in this project"
 ```
 
-LUICode will inspect the workspace and print a plan without making any changes.
-If it responds successfully, your provider and API key are configured correctly.
+LUICode will inspect the workspace and print a plan (writing it to `plan.md`)
+without modifying any source files. If it responds successfully, your provider
+and API key are configured correctly.
 
 ---
 
@@ -141,11 +142,11 @@ If it responds successfully, your provider and API key are configured correctly.
 
 ```bash
 luicode                      Launch the interactive terminal UI
-luicode --plan [task]        Inspect the project and generate a plan (no file changes)
+luicode --plan [task]        Inspect the project and generate a plan (writes plan.md only)
 luicode --auto "task"        Autonomous dev mode (safe permissions by default)
 luicode --auto=safe "task"   Autonomous mode, safe permission level
 luicode --auto=full "task"   Autonomous mode, full workspace autonomy
-luicode --resume             Resume the last interrupted session
+luicode --resume             Resume the last interrupted session (picker when several exist)
 luicode --resume "task"      Run a task, continuing an earlier session
 luicode --review             Review working-tree changes + security scan
 luicode --version            Show version
@@ -169,23 +170,50 @@ Shortcuts:
 | `Ctrl+A` | Toggle the activity panel |
 | `Ctrl+O` | Toggle automode (manual ↔ autonomous) |
 | `Ctrl+L` | Clear the screen |
-| `Y` / `N` | Approve / reject a plan or command approval prompt |
+| `Y` / `N` | Approve / reject a command approval prompt |
 | `Esc`   | Exit |
+
+**Plan approval (checkboxes):** when a plan is up for approval in `manual`
+mode, use `↑`/`↓` to move, `Space` to toggle a single step, `A` to select all
+steps, `Enter` to approve, and `N` / `Esc` to reject. Skipped steps stay out
+of the run.
+
+The status bar shows the session mode, the model assigned to each role, and
+running token/cost usage; a spinner and progress indicator keep you informed
+while the agent thinks, plans, or retries a fix.
 
 When stdin is not a TTY (piped or CI), LUICode runs in plain line mode instead
 of rendering the terminal UI.
 
-### Static websites (vanilla HTML/CSS/JS)
+### The plan file (`plan.md`)
 
-LUICode auto-detects static web projects (an `index.html` with no JS framework
-manifest) and web-intent tasks. For those it generates `index.html`, `style.css`,
-and `script.js` in the project root, skips `npm test`/build steps entirely, and
-never creates `.ts` files:
+Every plan LUICode produces is written to **`plan.md`** in the project root (in
+addition to the plan panel). The file captures the task, risk level, analysis,
+and each step with its type (`scaffold` / `install` / `edit` / `run` /
+`review`), the exact action, the reasoning, and its risk tier. Its status
+field is refreshed as the plan is **approved**, **rejected**, or
+**implemented**, so `plan.md` doubles as a lightweight run log. `luicode
+--plan` generates the file and makes no other changes.
 
-```bash
-luicode --auto "create a responsive website about Luicode"
-# → + index.html, + style.css, + script.js (only)
-```
+### Planner spec & framework adapters
+
+The planner classifies the workspace first:
+
+- **Empty / near-empty workspace** → from-scratch build: it plans an official
+  scaffolder step (e.g. `npx create-next-app@latest .`), a re-inspection step,
+  a script-suppressed install, and a lockfile verification.
+- **Task without a named stack** → the first step is a `blocked` "confirm the
+  technology stack" step instead of a silently guessed framework (no more
+  hardcoded vanilla HTML/CSS/JS output).
+- **Existing project** → the detected adapter's commands are used verbatim.
+
+Install, build, and test commands are routed through the **adapter registry**
+(`src/planner/adapters.ts`), which maintains `node-npm`, `node-pnpm`,
+`node-yarn`, `python-pip`, `python-poetry`, `rust-cargo`, `go-modules`, and
+`ruby-bundler`. Installs are always flagged `modify+network`, default to
+script-suppressed (`--ignore-scripts`) where supported, are scoped to known
+registries, and are always followed by a verification step — a zero exit code
+is never trusted on its own.
 
 ### Autonomy levels
 
@@ -199,14 +227,22 @@ luicode --auto "create a responsive website about Luicode"
 
 ### Workflow
 
-1. **Inspect** — LUICode reads the project (package.json, source layout, tests).
-2. **Plan** — A plan of steps is produced; shown for approval in manual mode.
-3. **Build** — File edits are applied with per-file diffs.
+1. **Inspect** — LUICode reads the project (manifest, source layout, tests) and
+   classifies it (from-scratch vs existing).
+2. **Plan** — A typed, risk-tiered plan is produced (LLM or offline heuristic),
+   routed through the detected framework adapter, and written to `plan.md`;
+   shown for approval in manual mode.
+3. **Build** — File edits are applied with per-file diffs (additions/deletions
+   stats shown in the diff panel).
 4. **Test** — The test command runs; failures drive the fix loop (up to a
-   configured iteration budget).
+   configured iteration budget), with a spinner and progress indicator during
+   each retry.
 5. **Build** — A compile/build step catches type or syntax errors.
-6. **Review** — A final summary lists what changed. Use `luicode --review` any
-   time for an independent security/health scan.
+6. **Review** — A final LLM-written summary lists what changed; `luicode
+   --review` runs an independent security/health scan any time.
+
+The agent narrates its work conversationally — it explains why a test failed
+and how it will fix it rather than echoing canned status lines.
 
 ## Configuration
 
@@ -234,7 +270,18 @@ terminal:
     - "npm test*"
     - "npm run build*"
     - "npm run lint*"
+  # Note: whitelist entries are PREFIX matches, not full globs. A trailing "*"
+  # is stripped and harmless ("npm test*" acts exactly like "npm test"), so
+  # "npm test" also matches "npm test --coverage".
+adapters:
+  node-npm:
+    install: "npm ci --ignore-scripts"
+    test: "npm run test:unit"
 ```
+
+`adapters` lets you override the install / install-one / test / build /
+scaffold / lockfile / verify commands of any adapter in the registry,
+per project.
 
 ### Providers
 
@@ -276,7 +323,10 @@ models:
   and the `.luicode` directory itself cannot be modified.
 - **Command guard** — shell commands are classified `safe` / `modify` /
   `blocked`. Blocked commands never run; modifying commands require approval
-  unless you configured a whitelist match (e.g. `npm test*`).
+  unless you configured a whitelist match (e.g. `npm test*`). Whitelist
+  entries are **prefix matches**: a trailing `*` is stripped (so `npm test*`
+  behaves the same as `npm test`), and any command starting with the entry is
+  allowed — `npm test*` also matches `npm test --coverage`.
 - **Secret redaction** — anything that looks like an API key is redacted
   (`sk-***`) before project content is sent to a model.
 - **`--review`** — scans changed files (or the workspace in non-git projects)
