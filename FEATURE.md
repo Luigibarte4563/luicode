@@ -200,7 +200,7 @@ tools (`git_status`, `git_diff`, `git_log`, `git_branch`) when git is enabled.
 ## 5. Verification & testing
 
 Every component ships with unit tests and fast-check property tests
-(`npm test` — 105 tests, 8 suites). The GeneratorAgent's eval harness
+(`npm test` — 155 tests, 11 suites). The GeneratorAgent's eval harness
 re-runs the spec's five canonical test cases on every change:
 
 - `Write a Python script for a web scraper` → `code`
@@ -211,3 +211,55 @@ re-runs the spec's five canonical test cases on every change:
 
 Add any new prompt or behaviour to this harness so quality is measured, not
 felt. Typecheck/lint: `npm run typecheck`.
+
+---
+
+## 6. Terminal UX — keyboard shortcuts & command registry
+
+The interactive TUI (`src/ui/TUI.ts`) is a thin renderer over three shared
+systems, all driven from a single source of truth:
+
+- **Command registry** (`src/ui/commands.ts`) — every action is a
+  `registerCommand` entry: id, name, description, `slash` name, `shortcut`
+  label, `keybindings` (combo + context), and an `execute(ctx, args)` handler.
+- **Keybinding manager** (`src/ui/keybindings.ts`) — converts raw keypresses
+  into canonical combos (`ctrl+p`, `space`, `up`, …), resolves them against a
+  `UiContext` (`global` / `plan` / `diff` / `terminal` / `agent` / `approval` /
+  `palette` / `models` / `sessions` / `help` / `prompt`). Resolve order is
+  *context-exact first, then global*, so a global shortcut can never shadow a
+  context-specific one. `conflicts()` reports duplicate (context, combo)
+  registrations at startup/tests.
+- **Overlay widgets** — `src/ui/shortcuts.ts` (`/help` + `?`, topics
+  shortcuts/commands/modes/safety/general/agent/panels), `commandPalette.ts`
+  (`Ctrl+P`, fuzzy filter, Enter runs the command), `modelManager.ts`
+  (`Ctrl+M`/`/models`: role ⇄ provider panes, `T` test-in-place, `D` default,
+  raw `<provider>/<model>` query line), `sessionPicker.ts`
+  (`Ctrl+R`/`/resume`: browse, `S` filter, `R` rename, `D` delete).
+
+Every user-facing action is reachable three ways — **keyboard shortcut, slash
+command, command palette** — and all three call the same `execute` handler, so
+no path can bypass the CommandGuard, permission manager, or approval gates.
+`/run <cmd>` still flows through `CommandGuard`; `BLOCKED` commands never
+execute no matter how the action was invoked. The TUI also exposes the Agent's
+run controls as `agent`-context shortcuts while the prompt is empty.
+
+## 7. Agent run controls (RunControl)
+
+`src/agent/runControl.ts` is the real control channel shared by the UI and the
+pipeline. The same instance is threaded through `Toolkit`, `PlanExecutor`, and
+`Agent`; the UI asks, the pipeline obeys:
+
+- **Pause/resume** — `waitIfPaused()` blocks at each safe checkpoint (before a
+  step, before a tool call), so pause is a genuine gate, not cosmetic.
+- **Stop** — `abort()` throws a `CANCELLED:` error at the next checkpoint; the
+  pipeline reports it as a user cancellation rather than a failure.
+- **One-shot step controls** — `requestSkip()` / `requestRetry()` /
+  `requestFix()` are consumed exactly once by the current step (skip, retry)
+  or the next loop pass (fix).
+- **Approval gate shortcuts** — `requestApproveNext()` / `requestRejectNext()`
+  set the *next* gate's outcome; they are consumed at the gate itself, so they
+  never bypass the safety chain.
+
+`Agent` exposes `cancel/pause/resume/skipStep/retryStep/requestFix/fixLoopNow`
+and closes over the same `RunControl`, letting the TUI's `Space/R/S/F/Y/N` hit
+the running pipeline with no race conditions.

@@ -19,11 +19,12 @@ import { inspectProject } from '../workspace/inspector';
 import { Planner, renderPlanMarkdown } from '../planner/Planner';
 import { ModelRouter } from '../router/ModelRouter';
 import { Toolkit } from './toolkit';
-import { PlanExecutor } from './executor';
+import { PlanExecutor, ExecutorResult } from './executor';
 import { SessionManager } from '../sessions/SessionManager';
 import { GitManager, GitFileSummary } from '../git/GitManager';
 import { classifyError, extractTestSummary } from './errors';
 import { SecurityScanner } from '../security/scan';
+import { RunControl, isCancelled } from './runControl';
 
 export interface AgentDeps {
   cwd: string;
@@ -35,6 +36,7 @@ export interface AgentDeps {
   session: Session;
   emit: (e: AgentEvent) => void;
   askApproval: (q: AskApproval) => Promise<ApprovalDecision>;
+  control?: RunControl;
 }
 
 export interface AgentRunResult {
@@ -51,10 +53,14 @@ export class Agent {
   config: LuicodeConfig;
   mode: AutonomyLevel;
   session: Session;
+  readonly control: RunControl;
   private toolkit: Toolkit;
   private planner: Planner;
   private git: GitManager;
   private scanner = new SecurityScanner();
+  private lastExecutor: PlanExecutor | null = null;
+  private lastPlan: Plan | null = null;
+  private lastFailing: TestResult[] = [];
 
   constructor(private deps: AgentDeps) {
     this.ws = new Workspace(deps.cwd);
@@ -62,11 +68,13 @@ export class Agent {
     this.mode = deps.mode;
     this.session = deps.session;
     const emit = deps.emit;
+    this.control = deps.control ?? new RunControl();
     this.toolkit = new Toolkit({
       ws: this.ws,
       config: deps.config,
       mode: deps.mode,
       emit,
+      control: this.control,
       askCommandApproval: async (command) => {
         const rec = { kind: 'command' as const, title: 'Run command', detail: command, items: [command] };
         const decision = await deps.askApproval(rec);
@@ -83,6 +91,67 @@ export class Agent {
     this.mode = mode;
     this.toolkit.setMode(mode);
     this.session.mode = mode;
+  }
+
+  // -------------------------------------------------------------------------
+  // Run controls (driven by keyboard shortcuts / slash commands)
+  // -------------------------------------------------------------------------
+
+  cancel(): boolean {
+    if (this.control.aborted) return false;
+    this.control.abort();
+    this.session.status = 'canceled';
+    this.deps.sessions.save(this.session);
+    this.emit('status', 'Operation cancelled.');
+    this.emit('error', 'Stopped by user', { error: new Error('Operation cancelled by user.') });
+    return true;
+  }
+
+  pause(): void {
+    this.control.pause();
+    this.emit('status', 'Paused — press Space to resume.');
+  }
+
+  resume(): void {
+    this.control.resume();
+    this.emit('status', 'Resumed.');
+  }
+
+  skipStep(): void {
+    this.control.requestSkip();
+    this.emit('status', 'Skipping current step…');
+  }
+
+  retryStep(): void {
+    this.control.requestRetry();
+    this.emit('status', 'Retrying current step…');
+  }
+
+  requestFix(): void {
+    this.control.requestFix();
+    this.emit('status', 'Fix loop requested.');
+  }
+
+  /**
+   * Run the fix loop now against the last failing tests. Safe to call while
+   * idle (e.g. after a batch run that left failures). Returns the number of
+   * fix passes executed.
+   */
+  async fixLoopNow(): Promise<number> {
+    const plan = this.lastPlan;
+    const failing = this.lastFailing.filter((t) => !t.passed);
+    if (!plan || !this.lastExecutor) {
+      this.emit('status', 'No previous failing run to fix.');
+      return 0;
+    }
+    if (!failing.length) {
+      this.emit('status', 'No failing tests from the last run.');
+      return 0;
+    }
+    this.emit('status', `Starting fix loop for ${failing.length} failing test run(s)…`);
+    const result = await this.fixIterations(this.lastExecutor, plan, failing, this.config.agent.maxIterations);
+    this.lastFailing = result.length ? this.lastFailing : [];
+    return result.length ? 0 : 1;
   }
 
   private emit(type: AgentEventType, text?: string, extra?: Partial<AgentEvent>): void {
@@ -106,27 +175,9 @@ export class Agent {
   }
 
   async runTask(task: string, opts?: { skipApproval?: boolean; planOnly?: boolean }): Promise<AgentRunResult> {
-    this.session.task = task;
-    this.session.status = 'active';
-    this.deps.sessions.save(this.session);
-    this.emit('status', 'Inspecting project…');
-    const profile = inspectProject(this.ws);
-
-    this.emit('status', `Detected ${profile.language} / ${profile.framework} — preparing implementation plan…`);
-    const plannerRouter = this.routerFor('planner');
-    const usePlannerLLM = plannerRouter !== null && !plannerRouter.isMock('planner');
-    const plan = await this.planner.create({
-      task,
-      ws: this.ws,
-      router: usePlannerLLM ? plannerRouter : null,
-      mode: this.mode,
-      adapters: this.config.adapters
-    });
-    this.session.plan = plan;
-    this.emit('plan', 'Plan ready', { plan });
-    this.emit('comment', undefined, { text: plan.analysis });
-    this.persistPlanMarkdown(plan);
-    this.deps.sessions.save(this.session);
+    await this.control.sync().catch(() => undefined);
+    const plan = await this.createPlanOnly(task);
+    if (this.control.aborted) return this.cancelledResult(plan);
 
     if (opts?.planOnly) {
       plan.status = 'pending';
@@ -136,8 +187,19 @@ export class Agent {
       return { plan, changedFiles: [], testResults: [], summary: renderPlanSummary(plan), session: this.session };
     }
 
+    if (this.control.rejectNext) {
+      this.control.takeRejectNext();
+      plan.status = 'rejected';
+      this.session.status = 'canceled';
+      this.persistPlanMarkdown(plan);
+      this.deps.sessions.save(this.session);
+      this.emit('summary', 'Plan rejected — no files were modified.');
+      return { changedFiles: [], testResults: [], summary: 'Plan rejected.', session: this.session, approvalDenied: true, plan };
+    }
+
     const autoApprove =
-      opts?.skipApproval === true || this.mode === 'full' || this.mode === 'safe';
+      opts?.skipApproval === true || this.mode === 'full' || this.mode === 'safe' || this.control.approveNext;
+    if (this.control.approveNext) this.control.takeApproveNext();
     if (!autoApprove) {
       const decision = await this.deps.askApproval({
         kind: 'plan',
@@ -161,31 +223,99 @@ export class Agent {
     this.persistPlanMarkdown(plan);
     this.deps.sessions.save(this.session);
 
+    return this.executeApproved(plan);
+  }
+
+  /**
+   * Plan-only entry point. Creates (or re-creates, for /replan) the
+   * implementation plan against the current project state without executing
+   * it. Shared by runTask and the /plan, /replan slash commands.
+   */
+  async createPlanOnly(task: string): Promise<Plan> {
+    await this.control.sync().catch(() => undefined);
+    this.session.task = task;
+    this.session.status = 'active';
+    this.deps.sessions.save(this.session);
+    this.emit('status', 'Inspecting project…');
+    const profile = inspectProject(this.ws);
+
+    this.emit('status', `Detected ${profile.language} / ${profile.framework} — preparing implementation plan…`);
+    const plannerRouter = this.routerFor('planner');
+    const usePlannerLLM = plannerRouter !== null && !plannerRouter.isMock('planner');
+    const plan = await this.planner.create({
+      task,
+      ws: this.ws,
+      router: usePlannerLLM ? plannerRouter : null,
+      mode: this.mode,
+      adapters: this.config.adapters
+    });
+    this.session.plan = plan;
+    this.emit('plan', 'Plan ready', { plan });
+    this.emit('comment', undefined, { text: plan.analysis });
+    this.persistPlanMarkdown(plan);
+    this.deps.sessions.save(this.session);
+    this.lastPlan = plan;
+    return plan;
+  }
+
+  /**
+   * Execute an already-approved plan through the coder router + PlanExecutor,
+   * including the test loop, automatic fix loop, diff emission and summary.
+   * Shared by runTask and the /execute slash command.
+   */
+  async executePlan(plan: Plan): Promise<AgentRunResult> {
+    plan.status = 'approved';
+    this.persistPlanMarkdown(plan);
+    this.deps.sessions.save(this.session);
+    return this.executeApproved(plan);
+  }
+
+  private async executeApproved(plan: Plan): Promise<AgentRunResult> {
     const coderRouter = this.routerFor('coder');
     const useLLM = coderRouter !== null && !coderRouter.isMock('coder');
     const executor = new PlanExecutor({
       toolkit: this.toolkit,
       router: coderRouter,
       useLLM,
+      control: this.control,
       runTests: async (command) => {
         this.emit('status', `Running tests: ${command}`);
+        await this.control.sync().catch(() => undefined);
         const rec = await this.toolkit.runCommandTool(command);
         const parsed = extractTestSummary(`${rec.stdout}\n${rec.stderr}\nexit: ${rec.code}`);
         return { command, passed: rec.code === 0 && parsed.passed, summary: parsed.summary };
       }
     });
+    this.lastExecutor = executor;
+    this.lastPlan = plan;
 
     this.emit('status', 'Executing approved plan…');
-    const result = await executor.execute(plan, {
-      analysis: plan.analysis,
-      filesToCreate: plan.filesToCreate,
-      filesToModify: plan.filesToModify,
-      steps: plan.steps.map((s) => ({ title: s.title, stepType: s.stepType, action: s.action, why: s.why, risk: s.risk })),
-      tests: plan.tests,
-      risk: plan.risk
-    }, this.config.agent.maxIterations);
+    let result: ExecutorResult;
+    try {
+      result = await executor.execute(
+        plan,
+        {
+          analysis: plan.analysis,
+          filesToCreate: plan.filesToCreate,
+          filesToModify: plan.filesToModify,
+          steps: plan.steps.map((s) => ({ title: s.title, stepType: s.stepType, action: s.action, why: s.why, risk: s.risk })),
+          tests: plan.tests,
+          risk: plan.risk
+        },
+        this.config.agent.maxIterations
+      );
+    } catch (err) {
+      if (isCancelled(err)) {
+        plan.status = 'cancelled';
+        this.persistPlanMarkdown(plan);
+        this.session.status = 'canceled';
+        this.deps.sessions.save(this.session);
+        this.emit('status', 'Execution stopped.');
+        return { plan, changedFiles: [], testResults: [], summary: 'Execution cancelled.', session: this.session };
+      }
+      throw err;
+    }
 
-    this.session.actions = this.session.actions;
     plan.status = 'implemented';
     this.persistPlanMarkdown(plan);
     this.session.testResults.push(...result.testResults);
@@ -194,8 +324,10 @@ export class Agent {
     await this.emitDiffs(result.changedFiles, new Set(plan.filesToCreate));
 
     const failing = result.testResults.filter((t) => !t.passed);
+    this.lastFailing = failing;
     let finalTests: TestResult[] = result.testResults;
-    if (failing.length && this.config.agent.autoFix && this.mode !== 'manual') {
+    const fixRequested = this.control.fixRequested && this.control.takeFix();
+    if (failing.length && (fixRequested || (this.config.agent.autoFix && this.mode !== 'manual'))) {
       finalTests = await this.fixIterations(executor, plan, failing, this.config.agent.maxIterations);
     }
 
@@ -207,6 +339,15 @@ export class Agent {
     this.deps.sessions.save(this.session);
     this.emit('summary', summary);
     return { plan, changedFiles: result.changedFiles, testResults: finalTests, summary, session: this.session };
+  }
+
+  private cancelledResult(plan: Plan): AgentRunResult {
+    plan.status = 'cancelled';
+    this.session.status = 'canceled';
+    this.persistPlanMarkdown(plan);
+    this.deps.sessions.save(this.session);
+    this.emit('status', 'Operation cancelled.');
+    return { plan, changedFiles: [], testResults: [], summary: 'Cancelled.', session: this.session };
   }
 
   private async fixIterations(

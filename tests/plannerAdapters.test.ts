@@ -4,7 +4,7 @@ import * as path from 'path';
 import { ADAPTERS, adapterForProfile, adapterNamed, resolveAdapters } from '../src/planner/adapters';
 import { Planner, parsePlanText, renderPlanMarkdown } from '../src/planner/Planner';
 import { Workspace } from '../src/workspace/Workspace';
-import { ProjectProfile } from '../src/workspace/inspector';
+import { ProjectProfile, inspectProject } from '../src/workspace/inspector';
 import { PlanTier, StepType } from '../src/types';
 
 function tmpdir(): string {
@@ -22,7 +22,8 @@ function profile(keyFiles: string[]): ProjectProfile {
     packageManager: 'npm',
     entryFiles: [],
     keyFiles,
-    staticWeb: false
+    staticWeb: false,
+    stackConfidence: keyFiles.length ? 'detected' : 'guessed'
   };
 }
 
@@ -175,14 +176,16 @@ describe('Planner heuristic planning', () => {
     expect(plan.tests).toContain('npm test');
   });
 
-  it('proposes a vanilla static site for unnamed web intent on an empty workspace', async () => {
+  it('asks for the stack instead of auto-generating a static site for empty workspaces', async () => {
     const dir = tmpdir();
     const ws = new Workspace(dir);
     const plan = await new Planner().create({ task: 'Build a website for my bakery', ws, router: null, mode: 'manual' });
 
-    expect(plan.filesToCreate).toContain('index.html');
-    expect(plan.steps.map((s) => s.title)).toContain('Create style.css with a modern responsive stylesheet');
-    expect(plan.risk).toBe('low');
+    const first = plan.steps[0];
+    expect(first.stepType).toBe('review');
+    expect(first.risk).toBe('blocked');
+    expect(first.title.toLowerCase()).toContain('stack');
+    expect(plan.filesToCreate).toEqual([]);
   });
 
   it('flags an ambiguous stack with a blocked clarify step instead of guessing', async () => {
@@ -221,5 +224,60 @@ describe('Planner heuristic planning', () => {
     for (const step of plan.steps) {
       expect(typeof step.title).toBe('string');
     }
+  });
+});
+
+describe('From-scratch stack confidence', () => {
+  it('skips the confirmation step and runs the named framework adapter when an empty workspace task names a framework', async () => {
+    const dir = tmpdir();
+    const ws = new Workspace(dir);
+    const plan = await new Planner().create({ task: 'Build me a Django app', ws, router: null, mode: 'manual' });
+
+    expect(plan.steps.some((s) => s.risk === 'blocked' && /stack/i.test(s.title))).toBe(false);
+    expect(plan.steps[0].stepType).toBe('scaffold');
+    expect(plan.steps[0].action).toContain('django');
+  });
+
+  it('fires the blocked confirmation step when an empty workspace task is silent on the stack', async () => {
+    const dir = tmpdir();
+    const ws = new Workspace(dir);
+    const plan = await new Planner().create({ task: 'Build a website for my bakery', ws, router: null, mode: 'manual' });
+
+    const first = plan.steps[0];
+    expect(first.stepType).toBe('review');
+    expect(first.risk).toBe('blocked');
+    expect(first.title.toLowerCase()).toContain('stack');
+  });
+
+  it('reports detected confidence for a manifest-backed project and never fires the confirmation step', async () => {
+    const dir = tmpdir();
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+    const ws = new Workspace(dir);
+
+    const profile = inspectProject(ws);
+    expect(profile.stackConfidence).toBe('detected');
+
+    const vague = await new Planner().create({ task: 'Improve the things', ws, router: null, mode: 'manual' });
+    expect(vague.steps[0].risk).not.toBe('blocked');
+    expect(vague.steps[0].title.toLowerCase()).not.toContain('confirm the technology stack');
+
+    const named = await new Planner().create({ task: 'Add a Django backend to this project', ws, router: null, mode: 'manual' });
+    expect(named.steps[0].risk).not.toBe('blocked');
+    expect(named.steps[0].title.toLowerCase()).not.toContain('confirm the technology stack');
+  });
+
+  it('only emits the vanilla template when the resolved stack is actually html-css-js', async () => {
+    const dir = tmpdir();
+    const ws = new Workspace(dir);
+    const plan = await new Planner().create({ task: 'Build a static website with plain html css js', ws, router: null, mode: 'manual' });
+
+    expect(plan.filesToCreate).toEqual(['index.html', 'style.css', 'script.js']);
+    expect(plan.steps.some((s) => s.risk === 'blocked' && /stack/i.test(s.title))).toBe(false);
+
+    const frameworkPlan = await new Planner().create({ task: 'Build a Next.js app', ws, router: null, mode: 'manual' });
+    expect(frameworkPlan.filesToCreate).not.toEqual(['index.html', 'style.css', 'script.js']);
+    expect(frameworkPlan.steps[0].stepType).toBe('scaffold');
+    expect(frameworkPlan.steps[0].action).toContain('create-next-app');
   });
 });

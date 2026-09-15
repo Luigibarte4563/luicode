@@ -2,13 +2,15 @@ import { DiffEngine } from '../src/diff/DiffEngine';
 import { CommandGuard } from '../src/security/commandGuard';
 import { Workspace } from '../src/workspace/Workspace';
 import { PermissionManager } from '../src/security/permission';
-import { parsePlanText } from '../src/planner/Planner';
+import { parsePlanText, PlanEnvironment } from '../src/planner/Planner';
 import { classifyError, extractTestSummary } from '../src/agent/errors';
-import { parseActions } from '../src/agent/executor';
+import { parseActions, PlanExecutor } from '../src/agent/executor';
+import { Toolkit } from '../src/agent/toolkit';
 import { SecurityScanner, redactSecrets } from '../src/security/scan';
 import { ModelRouter } from '../src/router/ModelRouter';
 import { DEFAULT_CONFIG } from '../src/config/schema';
 import { inspectProject } from '../src/workspace/inspector';
+import { Plan } from '../src/types';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -59,6 +61,13 @@ describe('CommandGuard', () => {
     expect(guard.classify('npm run build').risk).toBe('safe');
   });
 
+  it('treats a trailing-star whitelist entry as a prefix match', () => {
+    const globGuard = new CommandGuard({ whitelist: ['npm test*'] });
+    expect(globGuard.classify('npm test').risk).toBe('safe');
+    expect(globGuard.classify('npm test -- --watch').risk).toBe('safe');
+    expect(globGuard.classify('npm run dev').risk).toBe('modify');
+  });
+
   it('marks dependency/state changes as modify', () => {
     expect(guard.classify('npm install').risk).toBe('modify');
     expect(guard.classify('git commit -m x').risk).toBe('modify');
@@ -78,6 +87,20 @@ describe('Workspace boundary', () => {
     const ws = new Workspace('C:/Projects/app');
     expect(() => ws.resolve('../secret.txt')).toThrow(/outside the workspace/);
     expect(ws.resolveSafe('..\\..\\etc\\passwd')).toBeNull();
+  });
+
+  it('rejects writes through a symlink that points outside the workspace', () => {
+    const dir = tmpdir();
+    const outside = tmpdir();
+    const link = path.join(dir, 'escape');
+    try {
+      fs.symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      return; // symlink creation unavailable (non-elevated Windows); cannot verify
+    }
+    const ws = new Workspace(dir);
+    expect(ws.resolveSafe('escape/secret.txt')).toBeNull();
+    expect(() => ws.writeFile('escape/secret.txt', 'x')).toThrow(/outside the workspace/);
   });
 
   it('resolves relative paths safely', () => {
@@ -240,6 +263,53 @@ describe('ModelRouter fallback', () => {
   });
 });
 
+describe('PlanExecutor heuristic', () => {
+  function mkExecutor(dir: string): PlanExecutor {
+    const ws = new Workspace(dir);
+    const toolkit = new Toolkit({
+      ws,
+      config: DEFAULT_CONFIG,
+      mode: 'full',
+      emit: () => {},
+      askCommandApproval: async () => true
+    });
+    return new PlanExecutor({ toolkit, router: null, useLLM: false, runTests: async () => ({ command: '', passed: true, summary: '' }) });
+  }
+
+  function planWithStep(step: string): Plan {
+    return {
+      id: 'p1',
+      task: 'Fix the calculator for the app',
+      analysis: 'heuristic',
+      filesToCreate: ['src/calculator.ts'],
+      filesToModify: [],
+      steps: [{ id: 's1', title: step, status: 'pending' }],
+      tests: [],
+      risk: 'low',
+      status: 'approved',
+      createdAt: Date.now()
+    };
+  }
+
+  it('writes a .py file on a create step in a Python project', async () => {
+    const dir = tmpdir();
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'pyproject.toml'), '');
+    fs.writeFileSync(path.join(dir, 'src', 'main.py'), 'def main(): pass\n');
+    const env: PlanEnvironment = { analysis: '', filesToCreate: [], filesToModify: [], steps: [], tests: [], risk: 'low' };
+    const result = await mkExecutor(dir).execute(planWithStep('Create calculator module'), env, 5);
+    expect(result.actions.some((a) => a.kind === 'WRITE_FILE' && a.file && a.file.endsWith('.py'))).toBe(true);
+  });
+
+  it('falls back to DONE on a create step in an unsupported-language workspace', async () => {
+    const dir = tmpdir();
+    fs.writeFileSync(path.join(dir, 'index.html'), '<main></main>\n');
+    const env: PlanEnvironment = { analysis: '', filesToCreate: [], filesToModify: [], steps: [], tests: [], risk: 'low' };
+    const result = await mkExecutor(dir).execute(planWithStep('Create the landing page'), env, 5);
+    expect(result.actions).toEqual([]);
+  });
+});
+
 describe('ProjectInspector', () => {
   it('detects framework from package.json', () => {
     const dir = tmpdir();
@@ -253,5 +323,21 @@ describe('ProjectInspector', () => {
     const profile = inspectProject(ws);
     expect(profile.framework).toBe('React');
     expect(profile.testFramework).toBe('Jest');
+  });
+
+  it('detects the package manager from the workspace root, not process.cwd()', () => {
+    const dir = tmpdir();
+    const elsewhere = tmpdir();
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({}));
+    fs.writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '');
+    const previousCwd = process.cwd();
+    process.chdir(elsewhere);
+    try {
+      const ws = new Workspace(dir);
+      const profile = inspectProject(ws);
+      expect(profile.packageManager).toBe('pnpm');
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 });

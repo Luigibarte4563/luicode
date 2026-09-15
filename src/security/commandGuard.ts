@@ -1,4 +1,3 @@
-import * as path from 'path';
 import { CommandRisk } from '../types';
 
 export type { CommandRisk };
@@ -27,13 +26,6 @@ export const DANGEROUS_PREFIXES: Array<[string, string]> = [
   ['rmdir /s', 'removes directory tree (Windows)']
 ];
 
-export const GUI_MODIFIERS = [
-  '--force',
-  '-f',
-  '--push',
-  'push'
-];
-
 export interface GuardOptions {
   whitelist: string[];
   blockForceDeleteOutsideWorkspace?: boolean;
@@ -48,7 +40,8 @@ export class CommandGuard {
     if (!trimmed) return { risk: 'blocked', reason: 'Empty command' };
 
     const whitelisted = this.opts.whitelist.some((w) => {
-      const wTrim = w.trim().toLowerCase();
+      const raw = w.trim().toLowerCase();
+      const wTrim = raw.endsWith('*') ? raw.slice(0, -1) : raw;
       return wTrim.length > 0 && trimmed.toLowerCase().startsWith(wTrim);
     });
     if (whitelisted) return { risk: 'safe', reason: 'Whitelisted command (e.g. tests/build).' };
@@ -93,8 +86,6 @@ export class CommandGuard {
       return { risk: 'safe', reason: 'Read-only command.' };
     }
 
-    void GUI_MODIFIERS;
-    void path;
     if (/^([a-z]:\\)?[\w.\\/-]+$/i.test(trimmed) && !trimmed.includes(' ')) {
       return { risk: 'safe', reason: 'Simple program execution.' };
     }

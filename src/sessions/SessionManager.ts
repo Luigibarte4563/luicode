@@ -83,4 +83,20 @@ export class SessionManager {
       return null;
     }
   }
+
+  remove(fileOrId: string): boolean {
+    const file = fileOrId.endsWith('.json') ? fileOrId : `${fileOrId}.json`;
+    const target = path.join(this.dir, file);
+    if (!fs.existsSync(target)) return false;
+    fs.unlinkSync(target);
+    return true;
+  }
+
+  rename(fileOrId: string, task: string): boolean {
+    const session = this.load(fileOrId);
+    if (!session) return false;
+    session.task = task;
+    this.save(session);
+    return true;
+  }
 }

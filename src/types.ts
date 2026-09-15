@@ -1,3 +1,5 @@
+export type StackConfidence = 'detected' | 'guessed';
+
 export type AutonomyLevel = 'manual' | 'safe' | 'full';
 
 export type ProviderKind = 'openai' | 'anthropic' | 'ollama' | 'gemini';

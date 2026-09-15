@@ -1,4 +1,4 @@
-import { AdapterOverrideConfig, ModelMessage, Plan, PlanStep, PlanTier, StepType } from '../types';
+import { AdapterOverrideConfig, ModelMessage, Plan, PlanStep, PlanTier, StackConfidence, StepType } from '../types';
 import { ModelRouter } from '../router/ModelRouter';
 import { Workspace } from '../workspace/Workspace';
 import { ProjectProfile, inspectProject } from '../workspace/inspector';
@@ -83,35 +83,43 @@ export class Planner {
     return this.heuristic(input, profile);
   }
 
+  /**
+   * Resolves whether a from-scratch build is "confirmed" on its technology
+   * stack. A stack is confirmed when the inspector detected a manifest, or when
+   * the task text itself names a recognizable framework keyword. When the
+   * inspector only guessed (empty workspace) and the task is silent on the
+   * stack, the plan must stop and ask the user to confirm before scaffolding.
+   */
+  private stackConfirmed(input: PlannerInput, profile: ProjectProfile): boolean {
+    if (profile.stackConfidence === 'detected') return true;
+    return scaffoldFor(input.task) !== null;
+  }
+
   private heuristic(input: PlannerInput, profile: ProjectProfile): PlanEnvironment {
     const adapter = adapterForProfile(profile, input.adapters);
     const named = scaffoldFor(input.task);
-    const webIntent = /\b(website|web page|webpage|landing page|static site|homepage|marketing site|portfolio|a site for|docs site)\b/i.test(input.task);
-    const vanillaIntent = /\b(vanilla|html|css|javascript)\b/i.test(input.task);
-    const isScratch = !adapter && !profile.staticWeb && !profile.manifest && profile.keyFiles.length <= 1;
+    const scratch = profile.stackConfidence !== 'detected' && profile.entryFiles.length === 0;
 
-    if (profile.staticWeb || (isScratch && (webIntent || vanillaIntent)) && !named) {
-      return this.vanillaSitePlan(input, profile, isScratch);
-    }
-    if (isScratch && named) {
-      return this.scaffoldPlan(input, profile, named, adapter);
-    }
-    if (isScratch) {
+    if (scratch && !this.stackConfirmed(input, profile)) {
       return this.proposeStackPlan(input, profile);
+    }
+    if (scratch && named?.name === 'HTML/CSS/JS') {
+      return this.staticWebPlan(input, profile);
+    }
+    if (scratch && named) {
+      return this.scaffoldPlan(input, profile, named, adapter);
     }
     return this.existingProjectPlan(input, profile, adapter);
   }
 
-  private vanillaSitePlan(input: PlannerInput, profile: ProjectProfile, isScratch: boolean): PlanEnvironment {
+  private staticWebPlan(input: PlannerInput, profile: ProjectProfile): PlanEnvironment {
     const steps: PlanStepSpec[] = [
-      { title: 'Analyze the page requirements and the existing site structure', stepType: 'edit', risk: 'safe', why: 'Ground the markup in the actual page intent' },
-      { title: 'Create index.html with the page markup and content', stepType: 'edit', action: 'Create index.html in the project root', risk: 'modify', why: 'Deliver the page structure' },
-      { title: 'Create style.css with a modern responsive stylesheet', stepType: 'edit', action: 'Create style.css', risk: 'modify', why: 'Style the page responsively' },
-      { title: 'Create script.js with interactive vanilla behavior', stepType: 'edit', action: 'Create script.js', risk: 'modify', why: 'Add interactive behavior without a framework' },
-      { title: 'Review the generated webpage and fix any issues', stepType: 'review', risk: 'safe', why: 'Confirm the page renders as intended' }
+      { title: 'Create the static site scaffold (index.html, style.css, script.js)', stepType: 'edit', action: 'Create index.html, style.css and script.js with minimal canonical content', risk: 'modify', why: 'Static sites have no official scaffolder; the vanilla three-file layout is the conventional starting point' },
+      { title: `Create the ${shorten(input.task)} implementation`, stepType: 'edit', action: 'Write the page markup, styles and behaviour into the scaffolded files', risk: 'modify', why: 'Deliver the requested feature on top of the scaffold' },
+      { title: 'Add focused tests for the new behavior', stepType: 'edit', action: 'Write test files', risk: 'modify', why: 'Validate behavior automatically' }
     ];
     return {
-      analysis: `${profile.language} static website (${profile.framework}). No build or test steps required. Will generate index.html, style.css, and script.js in the project root.${isScratch ? ' The task did not name a framework, so a dependency-free vanilla stack is proposed — swap it out when approving if you prefer a framework.' : ''}`,
+      analysis: `From-scratch build: the task explicitly names a plain HTML/CSS/JS (static) stack, so no framework confirmation is needed and no framework adapter applies — the vanilla scaffold is the resolved stack. Risk low.`,
       filesToCreate: ['index.html', 'style.css', 'script.js'],
       filesToModify: [],
       steps,
@@ -216,6 +224,7 @@ export class Planner {
 Name: ${profile.name}
 Language: ${profile.language}
 Framework: ${profile.framework}
+Stack confidence: ${profile.stackConfidence === 'detected' ? 'detected (from project manifest)' : 'guessed (no project manifest — default is html-css-js; must confirm with the user unless the task names a stack)'}
 Test framework: ${profile.testFramework}
 Package manager: ${profile.packageManager}
 Entry files: ${profile.entryFiles.join(', ') || 'none'}
@@ -320,7 +329,8 @@ const STACKS: Array<ScafoldCommand & { rx: RegExp }> = [
   { rx: /\bexpress\b/i, cmd: 'npm init -y && npm install --ignore-scripts express', name: 'Express', configFile: 'package.json' },
   { rx: /\bdjango\b/i, cmd: 'pip install django && django-admin startproject project .', name: 'Django', configFile: 'manage.py' },
   { rx: /\bflask\b/i, cmd: 'pip install flask', name: 'Flask', configFile: 'requirements.txt' },
-  { rx: /\bfastapi\b/i, cmd: 'pip install "fastapi[standard]"', name: 'FastAPI', configFile: 'requirements.txt' }
+  { rx: /\bfastapi\b/i, cmd: 'pip install "fastapi[standard]"', name: 'FastAPI', configFile: 'requirements.txt' },
+  { rx: /\bstatic\s+(?:website|site|web\s?page)\b|\bvanilla\s+(?:html|css|js|javascript)\b|\b(?:plain\s+|pure\s+)?(?:html\s*css\s*js|html\/css\/js)\b/i, cmd: '', name: 'HTML/CSS/JS', configFile: 'index.html' }
 ];
 
 function scaffoldFor(task: string): ScafoldCommand | null {

@@ -146,6 +146,7 @@ luicode --plan [task]        Inspect the project and generate a plan (writes pla
 luicode --auto "task"        Autonomous dev mode (safe permissions by default)
 luicode --auto=safe "task"   Autonomous mode, safe permission level
 luicode --auto=full "task"   Autonomous mode, full workspace autonomy
+luicode --model <spec>       Route the coder to a model for this run (e.g. openai/gpt-4o-mini)
 luicode --resume             Resume the last interrupted session (picker when several exist)
 luicode --resume "task"      Run a task, continuing an earlier session
 luicode --review             Review working-tree changes + security scan
@@ -157,30 +158,73 @@ luicode --help               Show help
 
 Run `luicode` in a terminal inside your project. Type a task such as
 "How long does the diff engine take on a million-line file? Optimize it if
-needed." and press Enter.
+needed." and press **Ctrl+Enter** (or Enter).
 
-Shortcuts:
+**Global shortcuts:**
 
 | Key | Action |
 | --- | --- |
-| `Ctrl+C` | Cancel the running task (press again to exit) |
-| `Ctrl+P` | Toggle the plan panel |
-| `Ctrl+D` | Toggle the diff panel |
-| `Ctrl+T` | Toggle the terminal/command panel |
-| `Ctrl+A` | Toggle the activity panel |
-| `Ctrl+O` | Toggle automode (manual ↔ autonomous) |
-| `Ctrl+L` | Clear the screen |
-| `Y` / `N` | Approve / reject a command approval prompt |
-| `Esc`   | Exit |
+| `Ctrl+Enter` | Submit the current prompt |
+| `Ctrl+P` | Open the **command palette** (fuzzy search, Enter runs) |
+| `Ctrl+C` | Stop the running agent (when idle, exits) |
+| `Ctrl+R` | **Session picker** (resume / new / rename / delete) |
+| `Ctrl+M` | **Model manager** (roles ⇄ providers, test in place) |
+| `Ctrl+H` | Help (`/help`), `?` opens shortcuts too |
+| `Ctrl+D` | Focus the diff panel / show Git diff |
+| `Ctrl+G` | Git status |
+| `Ctrl+T` | Cycle panel area (plan → diff → terminal → prompt) |
+| `Ctrl+L` | Clear the panels |
+| `Ctrl+O` | Toggle autonomy mode (manual ⇄ safe) |
+| `Ctrl+Q` | Quit |
+| `Esc` | Close overlay / back to prompt |
+| `?` | Shortcuts popup (while the prompt is empty) |
+
+**Agent controls** (active while the agent is running and the prompt is empty):
+
+| Key | Action |
+| --- | --- |
+| `Space` | Pause / resume the agent |
+| `R` | Retry the current failed step |
+| `S` | Skip the current step |
+| `F` | Start the automatic fix loop |
+| `Y` | Approve the current gate |
+| `N` | Reject / skip the current gate |
+
+**Prompt editing:** `←`/`→` move the cursor, `Home`/`End` jump, `↑`/`↓`
+scroll history, and typing **`/`** opens slash-command autocomplete
+(use `↑`/`↓` to pick, `Tab` to complete, `Enter` to run).
+
+**Plan panel:** `↑`/`↓` or `j`/`k` move between steps, `Space` toggles a step,
+`A` selects all, `E` re-plans, `V` views `plan.md`, `N` skips/rejects, `Enter`
+executes the approved plan.
+
+**Diff/terminal panels:** `Ctrl+D` focuses the diff panel, `Ctrl+T` cycles the
+panel area, `g` shows git status while the diff panel is focused.
+
+**Command palette (`Ctrl+P`)** lists every action and slash command from the
+shared registry — type to filter, `↑`/`↓` to move, `Enter` to run. Every action
+has three equivalent ways to run it: keyboard shortcut, slash command, or
+palette entry. All of them call the same implementation, so the safety layer
+(CommandGuard, approval gates) is never bypassed by choosing a different path.
+
+**Slash commands:** type `/` to see a live list. Highlights: `/help [topic]`,
+`/models` (interactive), `/model <task> <provider/model>`, `/providers`,
+`/plan`, `/replan`, `/execute`, `/stop`, `/retry`, `/fix`, `/approve`,
+`/reject`, `/run <cmd>` (through CommandGuard), `/test`, `/build`, `/status`,
+`/log`, `/diff`, `/review`, `/context`, `/tree`, `/memory`, `/mode`,
+`/permissions`, `/tools`, `/config`, `/resume`, `/new`, `/quit`.
 
 **Plan approval (checkboxes):** when a plan is up for approval in `manual`
 mode, use `↑`/`↓` to move, `Space` to toggle a single step, `A` to select all
 steps, `Enter` to approve, and `N` / `Esc` to reject. Skipped steps stay out
-of the run.
+of the run. From the agent controls, `Y` approves the *next* approval gate and
+`N` rejects/skips it.
 
 The status bar shows the session mode, the model assigned to each role, and
 running token/cost usage; a spinner and progress indicator keep you informed
-while the agent thinks, plans, or retries a fix.
+while the agent thinks, plans, or retries a fix. Toast notifications appear
+above the input line, and overlays (help, palette, model manager, session
+picker, results) replace the panel area until dismissed with `Esc`.
 
 When stdin is not a TTY (piped or CI), LUICode runs in plain line mode instead
 of rendering the terminal UI.

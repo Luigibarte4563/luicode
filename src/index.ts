@@ -1,4 +1,5 @@
 export { Agent, renderPlanSummary, selectSteps } from './agent/Agent';
+export { RunControl, isCancelled } from './agent/runControl';
 export { PlanExecutor, parseActions, extractCommentary } from './agent/executor';
 export { classifyError, extractTestSummary } from './agent/errors';
 export { Toolkit } from './agent/toolkit';
@@ -56,4 +57,13 @@ export type {
 export { SessionManager } from './sessions/SessionManager';
 export { GitManager } from './git/GitManager';
 export { loadConfig } from './config/schema';
+export { TerminalUI, printWelcome } from './ui/TUI';
+export { COMMAND_REGISTRY, registerCommand, slashCommands, findCommandByName, executeSlash, paletteEntries, slashAutocomplete, parseSlash, ephemeralToolkit } from './ui/commands';
+export type { UICommand, CommandContext, CommandServices, TuiHost } from './ui/commands';
+export { KeybindingManager, normalizeKeypress, canonicalCombo, displayCombo } from './ui/keybindings';
+export type { Shortcut } from './ui/keybindings';
+export { HelpWindow } from './ui/shortcuts';
+export { CommandPalette } from './ui/commandPalette';
+export { ModelManager } from './ui/modelManager';
+export { SessionPicker } from './ui/sessionPicker';
 export * from './types';

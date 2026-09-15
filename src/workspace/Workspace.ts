@@ -15,8 +15,33 @@ const DEFAULT_IGNORES = [
   '.lui'
 ];
 
+function canonicalPath(p: string): string {
+  const abs = path.resolve(p);
+  try {
+    return fs.realpathSync(abs);
+  } catch {
+    // The path doesn't exist yet (e.g. about to be created): canonicalize the
+    // deepest existing ancestor and re-append the remaining segments.
+    const segments: string[] = [];
+    let cur = abs;
+    for (let i = 0; i < 64; i++) {
+      const parent = path.dirname(cur);
+      if (parent === cur) break;
+      segments.unshift(path.basename(cur));
+      cur = parent;
+      try {
+        const realAncestor = fs.realpathSync(cur);
+        return path.join(realAncestor, ...segments);
+      } catch {
+        continue;
+      }
+    }
+    return abs;
+  }
+}
+
 export function isWithin(root: string, target: string): boolean {
-  const rel = path.relative(path.resolve(root), path.resolve(target));
+  const rel = path.relative(canonicalPath(root), canonicalPath(target));
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
@@ -97,7 +122,11 @@ export class Workspace {
   }
 
   isProtected(abs: string): boolean {
-    return this.protectPaths().some((p) => abs === p || abs.startsWith(p + path.sep));
+    const canon = canonicalPath(abs);
+    return this.protectPaths().some((p) => {
+      const cp = canonicalPath(p);
+      return canon === cp || canon.startsWith(cp + path.sep);
+    });
   }
 
   tree(rel = '', depth = 4): string {

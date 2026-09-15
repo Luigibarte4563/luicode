@@ -2,11 +2,14 @@
 
 import * as readline from 'readline';
 import { Agent } from '../agent/Agent';
+import { RunControl } from '../agent/runControl';
 import { loadConfig } from '../config/schema';
+import { GitManager } from '../git/GitManager';
 import { ModelRouter } from '../router/ModelRouter';
 import { SessionManager } from '../sessions/SessionManager';
+import { Workspace } from '../workspace/Workspace';
 import { TerminalUI, printWelcome } from '../ui/TUI';
-import { AgentEvent, AutonomyLevel, LuicodeConfig, ProviderKind, TaskKind } from '../types';
+import { AgentEvent, AutonomyLevel, LuicodeConfig, ProviderKind, Session, TaskKind } from '../types';
 import {
   TASK_KINDS,
   addProviderOverride,
@@ -32,6 +35,7 @@ interface ParsedArgs {
   version: boolean;
   help: boolean;
   task: string;
+  model?: string;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -45,7 +49,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     task: ''
   };
   const positional: string[] = [];
-  for (const arg of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
     if (arg === '--version' || arg === '-v') out.version = true;
     else if (arg === '--help' || arg === '-h') out.help = true;
     else if (arg === '--plan') out.planOnly = true;
@@ -55,6 +60,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (arg === '--auto=safe') out.mode = 'safe';
     else if (arg === '--auto=full') out.mode = 'full';
     else if (arg.startsWith('--auto=')) out.mode = 'safe';
+    else if (arg === '--model') out.model = argv[++i];
+    else if (arg.startsWith('--model=')) out.model = arg.slice('--model='.length);
     else if (arg.startsWith('--')) out.help = true;
     else positional.push(arg);
   }
@@ -82,9 +89,21 @@ USAGE
   luicode --help                   Show this help
 
 INTERACTIVE KEYBINDINGS
-  Ctrl+C cancel/exit   Ctrl+L clear   Ctrl+P plan panel   Ctrl+D diff panel
-  Ctrl+T terminal   Ctrl+A activity   Ctrl+O toggle auto   Esc exit
-  Plan approval: ↑/↓ move · Space toggle step · A all · Enter approve · N/Esc reject
+  Global:   Ctrl+C stop/exit   Ctrl+Enter submit   Ctrl+P command palette
+            Ctrl+R sessions   Ctrl+M models   Ctrl+H help ('?' shortcuts)
+            Ctrl+D diff   Ctrl+G git status   Ctrl+T panel area
+            Ctrl+L clear   Ctrl+O toggle auto   Ctrl+Q quit
+  Agent:    Space pause/resume   R retry   F fix loop   S skip
+            Y approve gate   N reject/skip   Esc back
+  Prompt:   / -> slash commands (Tab/↑/↓ autocomplete)   ↑/↓ history
+  Plan:     ↑/↓ move · Space toggle step · A all · N skip · E replan · V view
+  Approval: Y approve / N reject
+
+SLASH COMMANDS
+  Use /help for topics, /models for the interactive manager, /model <task> <provider/model>,
+  /run <cmd> (through CommandGuard), /test, /build, /git, /review, /context, /tree,
+  /memory, /plan, /replan, /execute, /stop, /mode, /permissions, /tools, /config.
+  Type "/" in the prompt for a full list with autocomplete.
 
 CONFIG
   ~/.luicode/config.yaml            User-level settings (models, providers)
@@ -448,6 +467,7 @@ async function runTaskOnce(cwd: string, config: LuicodeConfig, sessions: Session
 }
 
 async function runInteractive(cwd: string, config: LuicodeConfig, sessions: SessionManager, interactive: boolean, projectName: string, args: ParsedArgs, resumeId?: string): Promise<void> {
+  if (args.model) applyCliModel(config, args.model);
   const mode = resolveMode(args.mode);
   let modeRef: AutonomyLevel = mode;
   let session;
@@ -458,12 +478,20 @@ async function runInteractive(cwd: string, config: LuicodeConfig, sessions: Sess
     return;
   }
 
-  const routerFor = (t: 'planner' | 'coder' | 'reviewer'): ModelRouter | null => new ModelRouter(config);
+  const routerFor = (t: TaskKind): ModelRouter | null => new ModelRouter(config);
+  const control = new RunControl();
+  const ws = new Workspace(cwd);
+  const git = new GitManager(cwd);
 
   printWelcome({ projectName, mode: label(modeRef), model: describeRoute(config), autoBoundary: config.auto.workspaceOnly });
 
   let agentRef: Agent;
   let running = false;
+
+  const isBusy = (): boolean => running || Boolean(agentRef && !agentRef.control.aborted && agentRef.session.status === 'active');
+  const setBusy = (b: boolean): void => {
+    if (b) running = true;
+  };
 
   const bindAgent = (a: Agent): void => {
     agentRef = a;
@@ -477,9 +505,9 @@ async function runInteractive(cwd: string, config: LuicodeConfig, sessions: Sess
       await agentRef.runTask(text, { skipApproval: modeRef !== 'manual' });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (isCancelledError(msg)) return;
       const ev: AgentEvent = { type: 'error', timestamp: Date.now(), error: new Error(msg), text: 'Operation failed' };
-      if (interactive) _ui.handleEvent(ev);
-      else printEvent(ev);
+      _ui.handleEvent(ev);
     } finally {
       running = false;
     }
@@ -496,24 +524,63 @@ async function runInteractive(cwd: string, config: LuicodeConfig, sessions: Sess
       _ui.setMode(modeRef);
     },
     onInput: (t) => void onTask(t),
-    interactive
+    interactive,
+    services: {
+      cwd,
+      projectName,
+      config,
+      mode: () => modeRef,
+      setMode: (m) => {
+        modeRef = m;
+        if (agentRef) agentRef.setMode(m);
+        _ui.setMode(m);
+      },
+      agent: () => agentRef,
+      sessions,
+      git,
+      ws,
+      routerFor,
+      runTask: (text) => onTask(text),
+      control,
+      interactive,
+      startNewSession: (t = '') => {
+        const next = sessions.create(t, modeRef);
+        session = next;
+        makeAgent(next);
+        _ui.toast('New session started.');
+      },
+      resumeSession: (id) => {
+        const s = sessions.load(id);
+        if (!s) {
+          _ui.toast('Session not found.');
+          return;
+        }
+        session = s;
+        makeAgent(s);
+        _ui.toast(`Resumed session ${s.id}`);
+      },
+      isBusy,
+      setBusy
+    }
   });
 
-  const agent = new Agent({
-    cwd,
-    config,
-    mode: modeRef,
-    router: null,
-    routerFor,
-    sessions,
-    session,
-    emit: (e) => {
-      if (interactive) _ui.handleEvent(e);
-      else printEvent(e);
-    },
-    askApproval: (q) => _ui.getApproval(q)
-  });
-  bindAgent(agent);
+  const makeAgent = (s: Session): void => {
+    const a = new Agent({
+      cwd,
+      config,
+      mode: modeRef,
+      router: null,
+      routerFor,
+      sessions,
+      session: s,
+      emit: (e) => _ui.handleEvent(e),
+      askApproval: (q) => _ui.getApproval(q),
+      control
+    });
+    bindAgent(a);
+  };
+
+  makeAgent(session);
 
   if (!interactive) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: false });
@@ -532,6 +599,21 @@ async function runInteractive(cwd: string, config: LuicodeConfig, sessions: Sess
 
   _ui.start();
   if (args.task) void onTask(args.task);
+}
+
+function applyCliModel(config: LuicodeConfig, value: string): void {
+  const idx = value.indexOf('/');
+  if (idx > 0) {
+    config.models = { ...config.models, coder: value };
+  } else if (isKnownProvider(config, value)) {
+    config.provider = value;
+  } else {
+    config.models = { ...config.models, coder: value };
+  }
+}
+
+function isCancelledError(msg: string): boolean {
+  return msg.startsWith('CANCELLED:') || msg === 'Error: CANCELLED' || msg.includes('ABORTED:');
 }
 
 function resolveMode(name: AutonomyLevel): AutonomyLevel {

@@ -9,6 +9,7 @@ import { gitTools } from '../tools/gitTools';
 import { astTools } from '../tools/astTools';
 import { GitManager } from '../git/GitManager';
 import { redactSecrets } from '../security/scan';
+import { RunControl } from './runControl';
 
 export interface ToolkitOptions {
   ws: Workspace;
@@ -16,6 +17,7 @@ export interface ToolkitOptions {
   mode: 'manual' | 'safe' | 'full';
   emit: (e: AgentEvent) => void;
   askCommandApproval: (command: string) => Promise<boolean>;
+  control?: RunControl;
 }
 
 export class Toolkit implements ToolRuntime {
@@ -53,6 +55,9 @@ export class Toolkit implements ToolRuntime {
   }
 
   async runCommandTool(command: string, timeouts?: { timeoutMs?: number; maxOutputBytes?: number }): Promise<CommandRecord> {
+    if (this.opts.control) {
+      await this.opts.control.sync().catch(() => undefined);
+    }
     const verdict = this.guard.classify(command);
     if (verdict.risk === 'blocked') {
       const rec: CommandRecord = { command, stdout: '', stderr: `BLOCKED: ${verdict.reason}`, code: 1, durationMs: 0, risk: 'blocked' };
@@ -79,6 +84,9 @@ export class Toolkit implements ToolRuntime {
   }
 
   async runTool(name: string, args: Record<string, unknown>): Promise<ToolCall> {
+    if (this.opts.control) {
+      await this.opts.control.sync().catch(() => undefined);
+    }
     const tool = this.tools.get(name);
     const call: ToolCall = {
       id: `${Date.now().toString(36)}`,

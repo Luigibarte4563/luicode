@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { StackConfidence } from '../types';
 import { Workspace } from './Workspace';
 
 export interface ProjectProfile {
@@ -14,6 +15,7 @@ export interface ProjectProfile {
   manifest?: Record<string, unknown>;
   keyFiles: string[];
   staticWeb?: boolean;
+  stackConfidence: StackConfidence;
 }
 
 const LANG_EXT: Array<[string, RegExp]> = [
@@ -82,12 +84,22 @@ function detectTestFramework(pkg: Record<string, unknown>): string {
   return 'Unknown';
 }
 
-function detectPackageManager(): string {
-  if (fs.existsSync(path.join(process.cwd(), 'pnpm-lock.yaml'))) return 'pnpm';
-  if (fs.existsSync(path.join(process.cwd(), 'yarn.lock'))) return 'yarn';
-  if (fs.existsSync(path.join(process.cwd(), 'package-lock.json'))) return 'npm';
+function detectPackageManager(root: string): string {
+  if (fs.existsSync(path.join(root, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (fs.existsSync(path.join(root, 'yarn.lock'))) return 'yarn';
+  if (fs.existsSync(path.join(root, 'package-lock.json'))) return 'npm';
   return 'npm';
 }
+
+const MANIFEST_FILES = [
+  'package.json',
+  'requirements.txt',
+  'pyproject.toml',
+  'Cargo.toml',
+  'go.mod',
+  'Gemfile',
+  'manage.py'
+];
 
 export function inspectProject(ws: Workspace): ProjectProfile {
   const files = ws.walkFiles();
@@ -100,6 +112,8 @@ export function inspectProject(ws: Workspace): ProjectProfile {
       pkg = undefined;
     }
   }
+
+  const hasManifest = pkg !== undefined || files.some((f) => MANIFEST_FILES.includes(f));
 
   const extCounts: Record<string, number> = {};
   for (const f of files) {
@@ -148,7 +162,9 @@ export function inspectProject(ws: Workspace): ProjectProfile {
 
   const detectedFramework = pkg ? detectFramework(pkg) : 'Unknown';
   const hasIndexHtml = files.includes('index.html');
-  const isVanilla = Boolean(hasIndexHtml && (!pkg || detectedFramework === 'Unknown'));
+  const isVanilla =
+    (hasIndexHtml && (!pkg || detectedFramework === 'Unknown')) ||
+    (!hasManifest && files.length === 0);
 
   const profile: ProjectProfile = {
     name: ws.root.split(path.sep).filter(Boolean).pop() ?? 'project',
@@ -157,11 +173,12 @@ export function inspectProject(ws: Workspace): ProjectProfile {
     bundler: pkg ? detectBundler(pkg) : isVanilla ? 'None' : 'Unknown',
     database: detectDatabase(files),
     testFramework: pkg ? detectTestFramework(pkg) : 'Unknown',
-    packageManager: detectPackageManager(),
+    packageManager: detectPackageManager(ws.root),
     entryFiles,
     manifest: pkg,
     keyFiles,
-    staticWeb: isVanilla
+    staticWeb: isVanilla,
+    stackConfidence: hasManifest ? 'detected' : 'guessed'
   };
   if (!isVanilla && pkg) profile.framework = detectFramework(pkg);
   return profile;

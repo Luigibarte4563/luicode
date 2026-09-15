@@ -113,6 +113,25 @@ run offline.
 | `luicode model test <provider/model>` | Ping a provider+key+model combination  |
 | `luicode model help`        | Print the command reference                         |
 
+Inside the interactive TUI the same routing is available without the CLI:
+
+- `/model <task> <provider/model>` — route one task to a model on the fly
+  (same persistence as `luicode model set`).
+- `/model <provider/model>` — set the coder model for the current task, or
+  `/model coder <provider/model>` to name the role explicitly.
+- `/models` (or `Ctrl+M`) — interactive **model manager**: two panes (roles on
+  the left, providers on the right). `Tab` hops panes, `↑↓`/`j`/`k` navigate,
+  `Enter`/`U` apply a provider to the selected role, `T` writes the change and
+  **tests the connection in place** (a spinner while it pings, a toast with the
+  result), `D` marks the selected role for set-default, `Esc` closes without
+  changes.
+- `--model <spec>` on the `luicode` command line routes the coder role for that
+  run only, e.g. `luicode --model openai/gpt-4o-mini "…"`.
+
+All routes go through the same `ModelRouter` + `config`-writing layer, so it
+does not matter whether you use the CLI, a slash command, or the interactive
+manager.
+
 ### Registering a custom (OpenAI-compatible) provider
 
 Any OpenAI-compatible endpoint can be integrated without code changes:
