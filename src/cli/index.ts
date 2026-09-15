@@ -6,7 +6,20 @@ import { loadConfig } from '../config/schema';
 import { ModelRouter } from '../router/ModelRouter';
 import { SessionManager } from '../sessions/SessionManager';
 import { TerminalUI, printWelcome } from '../ui/TUI';
-import { AgentEvent, AutonomyLevel, LuicodeConfig } from '../types';
+import { AgentEvent, AutonomyLevel, LuicodeConfig, ProviderKind, TaskKind } from '../types';
+import {
+  TASK_KINDS,
+  addProviderOverride,
+  isKnownProvider,
+  listProviderIntegrations,
+  parseModelSpec,
+  routingSummary,
+  saveConfigChanges,
+  setDefaultProvider,
+  setTaskModel,
+  testIntegration
+} from '../llm/integration';
+import { PROVIDER_REGISTRY } from '../llm/provider';
 
 export const VERSION = '0.2.0';
 export const TAGLINE = 'LUICode — Plan. Build. Test. Ship.';
@@ -60,6 +73,11 @@ USAGE
   luicode --auto=full              Autonomous mode, full workspace autonomy
   luicode --resume                 Resume an interrupted session (picker when several exist)
   luicode --review                 Review working-tree changes + security scan
+  luicode model                    List model routing and available providers
+  luicode model add <name>         Register a custom provider (--base-url --api-key --model)
+  luicode model set-default <n>    Set the default provider
+  luicode model set <task> <spec>  Route a task to a provider/model (e.g. coder openai/gpt-4o-mini)
+  luicode model test <spec>        Verify a provider/model connection (--api-key --timeout)
   luicode --version                Show version
   luicode --help                   Show this help
 
@@ -71,11 +89,236 @@ INTERACTIVE KEYBINDINGS
 CONFIG
   ~/.luicode/config.yaml            User-level settings (models, providers)
   .luicode/config.yaml              Per-project overrides
+  Use \`luicode model ...\` to manage integrations from the CLI (writes the user config).
   Env vars: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY,
             GROQ_API_KEY, DEEPSEEK_API_KEY, DASHSCOPE_API_KEY, TOGETHER_API_KEY
   Local/free: ollama (localhost:11434), litellm (localhost:4000), groq, deepseek, qwen
   API keys are never stored in the repository.
 `;
+}
+
+export function modelHelpText(): string {
+  return `luicode model — manage model/provider integration
+
+USAGE
+  luicode model                         List routing + providers (same as 'list')
+  luicode model list                    Show current routing and all providers
+  luicode model add <name>              Register a custom provider
+      --base-url <url>     API base URL (required for unknown providers)
+      --api-key <key>      API key (stored in config; use env vars for known providers)
+      --model <model>      Default model for this provider
+      --local              Write to .luicode/config.yaml instead of ~/.luicode/config.yaml
+  luicode model set-default <name>      Set the active provider (e.g. ollama, openrouter)
+      --local              Write to project config instead of user config
+  luicode model set <task> <provider/model>
+      Route planner/coder/reviewer/fallback to a specific model
+      --local              Write to project config instead of user config
+  luicode model test <provider/model>   Ping a connection to verify it works
+      --api-key <key>      API key to test with (not persisted)
+      --base-url <url>     Override base URL for the test (not persisted)
+      --timeout <ms>       Request timeout (default 20000)
+  luicode model help                    Show this help
+
+EXAMPLES
+  luicode model list
+  luicode model add openai --base-url https://api.openai.com/v1 --model gpt-4o-mini
+  luicode model set-default ollama
+  luicode model set coder openrouter/meta-llama/llama-3.3-70b-instruct
+  luicode model test myproxy/llama-3.1 --api-key sk-... --base-url https://proxy.example/v1
+`;
+}
+
+interface ModelArgs {
+  sub: string;
+  name?: string;
+  task?: string;
+  spec?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  kind?: ProviderKind;
+  timeoutMs?: number;
+  scope: 'user' | 'local';
+}
+
+function parseModelArgs(argv: string[]): ModelArgs {
+  const out: ModelArgs = { sub: argv[0] ?? 'list', scope: 'user' };
+  const positional: string[] = [];
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--local') out.scope = 'local';
+    else if (a === '--user') out.scope = 'user';
+    else if (a === '--base-url' || a === '--baseUrl') out.baseUrl = argv[++i];
+    else if (a.startsWith('--base-url=')) out.baseUrl = a.slice('--base-url='.length);
+    else if (a === '--api-key') out.apiKey = argv[++i];
+    else if (a.startsWith('--api-key=')) out.apiKey = a.slice('--api-key='.length);
+    else if (a === '--model') out.model = argv[++i];
+    else if (a.startsWith('--model=')) out.model = a.slice('--model='.length);
+    else if (a === '--kind') out.kind = argv[++i] as ProviderKind;
+    else if (a.startsWith('--kind=')) out.kind = a.slice('--kind='.length) as ProviderKind;
+    else if (a === '--timeout') out.timeoutMs = Number(argv[++i]);
+    else if (a.startsWith('--timeout=')) out.timeoutMs = Number(a.slice('--timeout='.length));
+    else if (a === '-h' || a === '--help') out.sub = 'help';
+    else positional.push(a);
+  }
+  if (out.sub === 'add') out.name = positional[0];
+  else if (out.sub === 'set-default') out.name = positional[0];
+  else if (out.sub === 'set') {
+    out.task = positional[0];
+    out.spec = positional[1];
+  } else if (out.sub === 'test') out.spec = positional[0];
+  return out;
+}
+
+function requireName(a: ModelArgs): boolean {
+  if (a.name) return true;
+  process.stdout.write('Missing provider name. Usage: luicode model add <name> [opts]\n');
+  return false;
+}
+
+function saved(file: string): string {
+  return `Saved to ${file}\n`;
+}
+
+function printModelList(config: LuicodeConfig): void {
+  const routing = routingSummary(config);
+  const width = Math.max(...TASK_KINDS.map((t) => t.length));
+  process.stdout.write('\nMODEL ROUTING\n');
+  for (const task of TASK_KINDS) {
+    process.stdout.write(`  ${task.padEnd(width)}  ${routing[task]}\n`);
+  }
+  const active =
+    config.provider === 'mock'
+      ? 'mock (offline mode)'
+      : config.provider;
+  process.stdout.write(`\nActive provider: ${active}\n`);
+
+  process.stdout.write('\nPROVIDERS\n');
+  const rows = listProviderIntegrations(config);
+  for (const p of rows) {
+    const flags = [
+      p.local ? 'local' : '',
+      p.freeTier ? 'free' : '',
+      p.custom ? 'custom' : '',
+      p.configured ? 'configured' : ''
+    ].filter(Boolean);
+    const key = p.apiKeySet
+      ? 'key: set'
+      : p.apiKeyEnv
+        ? `key: ${p.apiKeyEnv}`
+        : 'no key required';
+    const baseUrl = p.baseUrl.slice(0, 44);
+    const model = p.custom || p.configured ? `  model: ${p.defaultModel}` : '';
+    process.stdout.write(
+      `  ${p.name.padEnd(12)}${p.kind.padEnd(10)}${baseUrl.padEnd(45)}${flags.length ? `[${flags.join(', ')}] ` : ''}${key}${model}\n`
+    );
+  }
+  process.stdout.write('\nHint: register a custom provider with `luicode model add <name> --base-url <url>`.\n');
+}
+
+function modelList(config: LuicodeConfig): void {
+  printModelList(config);
+}
+
+function modelAdd(cwd: string, config: LuicodeConfig, a: ModelArgs): void {
+  if (!requireName(a)) return;
+  const name = a.name as string;
+  if (a.baseUrl === undefined && a.apiKey === undefined && a.model === undefined && PROVIDER_REGISTRY[name] === undefined) {
+    process.stdout.write(`Unknown provider "${name}". Provide --base-url to register a custom provider.\n`);
+    return;
+  }
+  const next = addProviderOverride(config, name, {
+    baseUrl: a.baseUrl,
+    apiKey: a.apiKey,
+    model: a.model
+  });
+  const file = saveConfigChanges({ providers: next.providers }, { scope: a.scope, cwd });
+  process.stdout.write(`Registered provider "${name}".\n${saved(file)}`);
+}
+
+function modelSetDefault(cwd: string, config: LuicodeConfig, a: ModelArgs): void {
+  if (!requireName(a)) return;
+  if (!isKnownProvider(config, a.name as string)) {
+    process.stdout.write(`Unknown provider "${a.name}". Register it first with \`luicode model add\`.\n`);
+    return;
+  }
+  const next = setDefaultProvider(config, a.name as string);
+  const file = saveConfigChanges({ provider: next.provider }, { scope: a.scope, cwd });
+  process.stdout.write(`Default provider set to "${a.name}".\n${saved(file)}`);
+}
+
+function modelSet(cwd: string, config: LuicodeConfig, a: ModelArgs): void {
+  if (!a.task || !a.spec) {
+    process.stdout.write('Usage: luicode model set <task> <provider/model>\n');
+    return;
+  }
+  const task = a.task as TaskKind;
+  if (!TASK_KINDS.includes(task)) {
+    process.stdout.write(`Unknown task "${a.task}". Valid tasks: ${TASK_KINDS.join(', ')}\n`);
+    return;
+  }
+  const parsed = parseModelSpec(a.spec);
+  if (!parsed.provider || !parsed.model) {
+    process.stdout.write('Expected a spec in <provider>/<model> form.\n');
+    return;
+  }
+  if (!isKnownProvider(config, parsed.provider)) {
+    process.stdout.write(`Unknown provider "${parsed.provider}". Register it first with \`luicode model add\`.\n`);
+    return;
+  }
+  const next = setTaskModel(config, task, a.spec);
+  const file = saveConfigChanges({ models: next.models as Record<TaskKind, string> }, { scope: a.scope, cwd });
+  process.stdout.write(`Route ${task} -> ${a.spec}.\n${saved(file)}`);
+}
+
+async function modelTest(config: LuicodeConfig, a: ModelArgs): Promise<void> {
+  if (!a.spec) {
+    process.stdout.write('Usage: luicode model test <provider/model> [--api-key KEY] [--base-url URL] [--timeout MS]\n');
+    return;
+  }
+  const parsed = parseModelSpec(a.spec);
+  if (!parsed.provider) return;
+  if (!isKnownProvider(config, parsed.provider) && !a.baseUrl) {
+    process.stdout.write(`Unknown provider "${parsed.provider}". Provide --base-url or register it first.\n`);
+    return;
+  }
+  process.stdout.write(`Testing ${a.spec} ...\n`);
+  const result = await testIntegration(config, a.spec, {
+    apiKey: a.apiKey,
+    baseUrl: a.baseUrl,
+    timeoutMs: a.timeoutMs
+  });
+  if (result.ok) {
+    process.stdout.write(`OK ${result.provider}/${result.model} (${result.latencyMs} ms): ${result.reply}\n`);
+  } else {
+    process.stdout.write(`FAILED ${result.provider}/${result.model} (${result.latencyMs} ms): ${result.error}\n`);
+  }
+}
+
+async function runModelCommand(cwd: string, config: LuicodeConfig, argv: string[]): Promise<void> {
+  const a = parseModelArgs(argv);
+  switch (a.sub) {
+    case 'help':
+      process.stdout.write(modelHelpText());
+      break;
+    case 'list':
+      modelList(config);
+      break;
+    case 'add':
+      modelAdd(cwd, config, a);
+      break;
+    case 'set-default':
+      modelSetDefault(cwd, config, a);
+      break;
+    case 'set':
+      modelSet(cwd, config, a);
+      break;
+    case 'test':
+      await modelTest(config, a);
+      break;
+    default:
+      process.stdout.write(`Unknown model subcommand "${a.sub}". Run \`luicode model help\`.\n`);
+  }
 }
 
 function describeRoute(config: LuicodeConfig): string {
@@ -300,7 +543,8 @@ function label(mode: AutonomyLevel): string {
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const args = parseArgs(argv);
 
   if (args.version) {
     process.stdout.write(`luicode v${VERSION}\n`);
@@ -316,6 +560,11 @@ async function main(): Promise<void> {
   const sessions = new SessionManager(cwd);
   const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   const projectName = cwd.split(/[\\/]/).filter(Boolean).pop() ?? 'project';
+
+  if (argv[0] === 'model') {
+    await runModelCommand(cwd, config, argv.slice(1));
+    return;
+  }
 
   if (args.review) {
     await runReview(cwd, config, sessions);

@@ -29,7 +29,30 @@ export { PermissionManager } from './security/permission';
 export { SecurityScanner, redactSecrets } from './security/scan';
 export { ModelRouter } from './router/ModelRouter';
 export { createProvider } from './llm/factory';
-export { PROVIDER_REGISTRY, isFreeProvider } from './llm/provider';
+export { PROVIDER_REGISTRY, isFreeProvider, apiKeyFor, resolveModel } from './llm/provider';
+export {
+  TASK_KINDS,
+  parseModelSpec,
+  formatModelSpec,
+  defaultModelForTask,
+  routingSummary,
+  listProviderIntegrations,
+  setDefaultProvider,
+  setTaskModel,
+  addProviderOverride,
+  saveConfigChanges,
+  testIntegration,
+  isKnownProvider
+} from './llm/integration';
+export type {
+  ModelSpec,
+  ProviderIntegration,
+  ProviderOverrideOptions,
+  ConfigChanges,
+  ConfigScope,
+  IntegrationTestOptions,
+  IntegrationTestResult
+} from './llm/integration';
 export { SessionManager } from './sessions/SessionManager';
 export { GitManager } from './git/GitManager';
 export { loadConfig } from './config/schema';

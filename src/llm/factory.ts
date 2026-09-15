@@ -13,7 +13,12 @@ export function providerInfo(name: string, config: LuicodeConfig): ProviderInfo 
   return info;
 }
 
-export function createProvider(name: string, model: string | undefined, config: LuicodeConfig): LLMProvider {
+export function createProvider(
+  name: string,
+  model: string | undefined,
+  config: LuicodeConfig,
+  opts?: { fetch?: typeof fetch }
+): LLMProvider {
   const info = providerInfo(name, config);
   if (name === 'mock') return new MockProvider();
   const modelName = resolveModel(name, model ?? config.providers?.[name]?.model);
@@ -23,12 +28,12 @@ export function createProvider(name: string, model: string | undefined, config: 
       : apiKeyFor(info) ?? config.providers?.[name]?.apiKey;
   switch (info.kind) {
     case 'anthropic':
-      return new AnthropicClient(info, modelName, { apiKey });
+      return new AnthropicClient(info, modelName, { apiKey, fetch: opts?.fetch });
     case 'ollama':
-      return new OllamaClient(info, modelName);
+      return new OllamaClient(info, modelName, { fetch: opts?.fetch });
     case 'gemini':
     case 'openai':
     default:
-      return new ModelClient(info, modelName, { apiKey });
+      return new ModelClient(info, modelName, { apiKey, fetch: opts?.fetch });
   }
 }

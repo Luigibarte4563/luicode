@@ -95,3 +95,20 @@ export function loadConfig(cwd: string): LuicodeConfig {
 export function configFilesFor(cwd: string): string[] {
   return configCandidates(cwd);
 }
+
+export function configUserFile(): string {
+  return path.join(os.homedir(), '.luicode', 'config.yaml');
+}
+
+export function configProjectFile(cwd: string): string {
+  return path.join(cwd, '.luicode', 'config.yaml');
+}
+
+export function readConfigFile(file: string): Record<string, unknown> | null {
+  return parseFile(file);
+}
+
+export function writeConfigFile(file: string, data: Record<string, unknown>): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, YAML.stringify(data));
+}
