@@ -4,6 +4,12 @@ LUICode talks to large language models through a small, pluggable **provider lay
 guide walks through configuring, registering, and verifying model integrations so the planner,
 coder, reviewer, and fallback tasks talk to the models you want.
 
+> **New in this repo:** the recommended way to configure models per project is
+> `.luicode/settings.lock.json` (copy `.luicode.example/` → `.luicode/`). See
+> **MODEL_SETUP.md** — a step-by-step guide with ready-to-paste examples for
+> Claude, OpenAI, Ollama, OpenRouter, Groq, DeepSeek, and custom endpoints. This
+> file covers the underlying provider layer and the `luicode model` CLI in depth.
+
 ---
 
 ## 1. Quick start
@@ -23,8 +29,9 @@ luicode model test openai/gpt-4o-mini
 ```
 
 After any `luicode model ...` change, the effective config is written to
-`~/.luicode/config.yaml` (or `.luicode/config.yaml` in the current project when
-`--local` is passed).
+`~/.luicode/config.yaml` (or — when `--local` is passed — to
+`.luicode/settings.lock.json` if present, otherwise `.luicode/config.yaml`
+in the current project).
 
 ---
 
@@ -150,8 +157,9 @@ luicode model set-default myproxy
 - `--base-url` is required for providers that are not already known.
 - `--api-key` is optional; known providers prefer their env var, but a
   config-level key is used as a fallback. Consider exporting the env var instead.
-- `--local` writes the change to `.luicode/config.yaml` in the current project
-  (handy for per-project integration) instead of the user-level config.
+- `--local` writes the change to `.luicode/settings.lock.json` when that file
+  exists, otherwise `.luicode/config.yaml`, in the current project (handy for
+  per-project integration) instead of the user-level config.
 
 ### Testing a connection
 
@@ -192,8 +200,17 @@ Set `provider: mock` to force fully offline operation.
 Config is resolved by deep-merging, lowest to highest priority:
 
 1. Built-in defaults (`config/default.yaml`)
-2. `~/.luicode/config.yaml` or `.json` — user-level (written by `luicode model ...`)
-3. `.luicode/config.yaml` or `.json` — per-project overrides
+2. `~/.luicode/settings.lock.json` — user-level model lock
+3. `~/.luicode/config.yaml` or `.json` — user-level (written by `luicode model ...`)
+4. `.luicode/settings.lock.json` — **project model lock (highest priority)**
+5. `.luicode/config.yaml` or `.json` — per-project overrides
+
+`settings.lock.json` always wins and is the idiomatic place to commit-readable
+model/provider meta per project (copy `.luicode.example/settings.lock.json`).
+With `--local`, `luicode model ...` writes to `.luicode/settings.lock.json`
+when it exists — otherwise to `.luicode/config.yaml`. For a repository team,
+keep both files *provider meta* only (no keys) and leave secrets in env vars or
+the user-level config:
 
 ```yaml
 # ~/.luicode/config.yaml
@@ -209,6 +226,22 @@ providers:
   myproxy:
     baseUrl: https://proxy.example.com/v1
     model: llama-3.1-70b
+```
+
+```jsonc
+// <project>/.luicode/settings.lock.json — model lock, template in .luicode.example/
+{
+  "provider": "anthropic",
+  "models": {
+    "planner":  "anthropic/claude-sonnet-4-20250514",
+    "coder":    "anthropic/claude-sonnet-4-20250514",
+    "reviewer": "anthropic/claude-sonnet-4-20250514",
+    "fallback": "ollama/llama3.1"
+  },
+  "providers": {},
+  "fallbackOrder": ["ollama", "anthropic"],
+  "auto": { "mode": "manual", "workspaceOnly": true }
+}
 ```
 
 > Tip: for a repository team, keep `.luicode/config.yaml` *provider meta* only
@@ -259,7 +292,7 @@ luicode model test vllm/default
 ## 8. Security notes
 
 - API keys are only stored inside config files under your home directory (or — with
-  `--local` — in a project config that you should keep out of version control).
+  `--local` — in a project config under `.luicode/` that you should keep out of version control).
 - `luicode model test` and `luicode model add` accept keys on the command line; on
   multi-user machines prefer setting the environment variable instead.
 - Keep `.luicode/` out of git unless the config is key-free: add

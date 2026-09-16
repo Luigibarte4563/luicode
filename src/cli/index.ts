@@ -106,13 +106,16 @@ SLASH COMMANDS
   Type "/" in the prompt for a full list with autocomplete.
 
 CONFIG
+  ~/.luicode/settings.lock.json     User-level model lock (highest priority for models)
   ~/.luicode/config.yaml            User-level settings (models, providers)
+  .luicode/settings.lock.json       Per-project model lock (highest priority for models)
   .luicode/config.yaml              Per-project overrides
   Use \`luicode model ...\` to manage integrations from the CLI (writes the user config).
   Env vars: OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY,
             GROQ_API_KEY, DEEPSEEK_API_KEY, DASHSCOPE_API_KEY, TOGETHER_API_KEY
   Local/free: ollama (localhost:11434), litellm (localhost:4000), groq, deepseek, qwen
   API keys are never stored in the repository.
+  Copy .luicode.example/ to .luicode/ and edit settings.lock.json to configure models.
 `;
 }
 
@@ -126,9 +129,9 @@ USAGE
       --base-url <url>     API base URL (required for unknown providers)
       --api-key <key>      API key (stored in config; use env vars for known providers)
       --model <model>      Default model for this provider
-      --local              Write to .luicode/config.yaml instead of ~/.luicode/config.yaml
+      --local              Write to .luicode/settings.lock.json (or config.yaml) in this project
   luicode model set-default <name>      Set the active provider (e.g. ollama, openrouter)
-      --local              Write to project config instead of user config
+      --local              Write to project config instead of user config (settings.lock.json when present)
   luicode model set <task> <provider/model>
       Route planner/coder/reviewer/fallback to a specific model
       --local              Write to project config instead of user config
@@ -137,6 +140,15 @@ USAGE
       --base-url <url>     Override base URL for the test (not persisted)
       --timeout <ms>       Request timeout (default 20000)
   luicode model help                    Show this help
+
+CONFIG FILES
+  Settings are loaded in order (later wins):
+    ~/.luicode/settings.lock.json       User-level model lock
+    ~/.luicode/config.yaml              User-level config
+    .luicode/settings.lock.json         Project-level model lock  ← EDIT THIS ONE
+    .luicode/config.yaml                Project-level config
+
+  See .luicode.example/settings.lock.json for a ready-to-copy template.
 
 EXAMPLES
   luicode model list

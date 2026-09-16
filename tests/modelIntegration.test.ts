@@ -133,6 +133,32 @@ describe('saveConfigChanges', () => {
     expect(provs.myproxy.baseUrl).toBe('http://new/v1');
     expect(provs.myproxy.model).toBe('x');
   });
+
+  it('prefers settings.lock.json for local model changes when it exists', () => {
+    const dir = tmpdir();
+    const lock = path.join(dir, '.luicode', 'settings.lock.json');
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    fs.writeFileSync(lock, JSON.stringify({ provider: 'anthropic', models: { coder: 'anthropic/claude-sonnet-4-20250514' } }));
+    const file = saveConfigChanges({ models: { coder: 'anthropic/claude-3-5-sonnet-latest' } }, { scope: 'local', cwd: dir });
+    expect(file).toBe(lock);
+    const read = readConfigFile(lock);
+    expect(read!.provider).toBe('anthropic');
+    expect((read!.models as Record<string, string>).coder).toBe('anthropic/claude-3-5-sonnet-latest');
+  });
+
+  it('writes valid JSON to settings.lock.json', () => {
+    const dir = tmpdir();
+    const lock = path.join(dir, '.luicode', 'settings.lock.json');
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    fs.writeFileSync(lock, '{}');
+    saveConfigChanges(
+      { provider: 'ollama', providers: { ollama: { baseUrl: 'http://localhost:11434' } } },
+      { scope: 'local', cwd: dir }
+    );
+    const raw = fs.readFileSync(lock, 'utf8');
+    expect(() => JSON.parse(raw)).not.toThrow();
+    expect(JSON.parse(raw).provider).toBe('ollama');
+  });
 });
 
 describe('isKnownProvider', () => {

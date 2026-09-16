@@ -2,7 +2,7 @@
 
 **Scope:** `src/**`, `tests/**`, `config/**`, build/test config
 **Base:** commit `fbe0232`, branch `main`
-**Method:** static review of the current tree + `npm run typecheck` + full `npm test` (8 suites / 100 tests, all passing)
+**Method:** static review of the current tree + `npm run typecheck` + full `npm test` (11 suites / 157 tests, all passing)
 
 ---
 
@@ -68,7 +68,7 @@ implementation.
 ## 4. Findings
 
 > **Status note (base `fbe0232` → current):** fixes 1–5 below are resolved and
-> verified by `npm run typecheck` (clean) and `npm test` (105/105).
+> verified by `npm run typecheck` (clean) and `npm test` (157/157).
 
 ### 4.1 Correctness & robustness
 
@@ -164,7 +164,7 @@ decision: `.gitignore` entry, or include it deliberately in the summary of
 | Check | Status |
 | --- | --- |
 | `npm run typecheck` (`tsc --noEmit`) | Pass, 0 errors |
-| `npm test` (jest, 8 suites) | 105/105 pass |
+| `npm test` (jest, 11 suites) | 157/157 pass |
 | Coverage config | `collectCoverageFrom` excludes `src/cli/**`, `src/ui/**` |
 
 Coverage is solid in the engine (`Agent`, `executor`, `Planner`, `Workspace`,
@@ -201,5 +201,21 @@ Ran on Windows (PowerShell), once after each fix step:
 
 ```
 npm run typecheck  → clean (0 errors)
-npm test           → 8 passed suites, 105 passed tests
+npm test           → 11 passed suites, 157 passed tests
 ```
+
+---
+
+## 8. Change log (current working tree)
+
+- **Model integration lock file.** Config now also loads
+  `.luicode/settings.lock.json` (user + project), which takes highest
+  priority for provider/model routing. `.luicode.example/settings.lock.json`
+  ships as the template; `writeConfigFile` emits real JSON for `.json` files;
+  `luicode model … --local` writes to `settings.lock.json` when it exists
+  (`src/config/schema.ts`, `src/llm/integration.ts`, `src/cli/index.ts`).
+- **Docs updated:** README (setup + config precedence), MODEL_SETUP.md (new
+  step-by-step model integration guide), MODEL_INTEGRATION.md (points to
+  MODEL_SETUP.md, updated precedence), FEATURE.md (config bullet + test count),
+  this file.
+- Tests added for the lock-file write path (`tests/modelIntegration.test.ts`).

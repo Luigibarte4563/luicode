@@ -69,10 +69,23 @@ For a fully local, free setup use **Ollama** — no key required. Install it fro
 ollama pull llama3.1
 ```
 
-### 2. Create a user config (recommended)
+### 2. Create a config (recommended)
 
-Create `~/.luicode/config.yaml` (or `.json`) to set your preferred provider and
-models once, globally:
+**Project-level model config.** Copy the template and edit the model lock —
+the recommended way to set up a provider like Claude per project:
+
+```bash
+cp -r .luicode.example .luicode     # creates .luicode/settings.lock.json
+export ANTHROPIC_API_KEY="sk-ant-..."   # or your provider's key
+luicode model test anthropic/claude-sonnet-4-20250514
+```
+
+`settings.lock.json` always takes priority and is the fastest way to route the
+planner/coder/reviewer roles to any provider. See **MODEL_SETUP.md** for the
+full guide and per-provider examples.
+
+**Global user config.** Create `~/.luicode/config.yaml` (or `.json`) to set your
+preferred provider and models once, globally:
 
 ```yaml
 # ~/.luicode/config.yaml
@@ -90,7 +103,8 @@ auto:
 
 You can also create a per-project override at `<project>/.luicode/config.yaml`.
 Project settings take precedence over the global file, which takes precedence
-over the built-in defaults.
+over the built-in defaults. `settings.lock.json` (user or project) takes
+priority over all of them.
 
 ### 3. Quick-start examples
 
@@ -290,11 +304,16 @@ and how it will fix it rather than echoing canned status lines.
 
 ## Configuration
 
-LUICode merges settings from, in order:
+LUICode merges settings from, in order (lowest to highest priority):
 
-1. `~/.luicode/config.yaml` (or `config.json`) — global user settings
-2. `<project>/.luicode/config.yaml` (or `config.json`) — per-project settings
-3. Built-in defaults (`config/default.yaml` in the LUICode install)
+1. Built-in defaults (`config/default.yaml` in the LUICode install)
+2. `~/.luicode/settings.lock.json` — global model lock
+3. `~/.luicode/config.yaml` (or `config.json`) — global user settings
+4. `<project>/.luicode/settings.lock.json` — project model lock
+5. `<project>/.luicode/config.yaml` (or `config.json`) — per-project settings
+
+`settings.lock.json` is the highest-priority file and is meant for model /
+provider integration (copy `.luicode.example/` to `.luicode/` to start).
 
 Example `~/.luicode/config.yaml`:
 

@@ -1,0 +1,17 @@
+{
+  "provider": "anthropic",
+  "models": {
+    "planner":  "anthropic/claude-sonnet-4-20250514",
+    "coder":    "anthropic/claude-sonnet-4-20250514",
+    "reviewer": "anthropic/claude-sonnet-4-20250514",
+    "fallback": "ollama/llama3.1"
+  },
+  "providers": {
+    "anthropic": {}
+  },
+  "fallbackOrder": ["ollama", "anthropic", "openai", "groq"],
+  "auto": {
+    "mode": "manual",
+    "workspaceOnly": true
+  }
+}

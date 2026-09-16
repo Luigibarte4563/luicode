@@ -1,6 +1,6 @@
 import * as readline from 'readline';
 import { AgentEvent, ApprovalDecision, AskApproval, AutonomyLevel, CommandRisk, DiffEntry, LuicodeConfig, Session, Plan } from '../types';
-import { CLEAR_SCREEN, CURSOR_HOME, HIDE_CURSOR, RESET, SHOW_CURSOR, paint, wrapAnsi } from './ansi';
+import { CLEAR_SCREEN, CURSOR_HOME, HIDE_CURSOR, RESET, SHOW_CURSOR, cursorTo, paint, wrapAnsi } from './ansi';
 import { KeybindingManager, normalizeKeypress } from './keybindings';
 import { CommandContext, CommandServices, TuiHost, COMMAND_REGISTRY, executeSlash, slashAutocomplete, slashCommands, isCommandAvailable, UiContext, findCommandByName, modelRoutingLines } from './commands';
 import { HelpWindow } from './shortcuts';
@@ -562,20 +562,38 @@ export class TerminalUI implements TuiHost {
     const width = process.stdout.columns || 100;
     const height = process.stdout.rows || 30;
     const frame = CLEAR_SCREEN + CURSOR_HOME + HIDE_CURSOR;
-    const parts: string[] = [];
 
     if (this.overlay !== 'none') {
-      parts.push(this.paintOverlay(width, height));
-      process.stdout.write(frame + parts.join('\n') + SHOW_CURSOR);
+      const content = this.paintOverlay(width, height);
+      if (this.overlay === 'palette') {
+        // Command palette has a live text field on its second line ("> /query").
+        process.stdout.write(frame + content + cursorTo(3 + this.palette.queryText.length, 1) + SHOW_CURSOR);
+      } else {
+        process.stdout.write(frame + content + SHOW_CURSOR);
+      }
       return;
     }
 
-    parts.push(this.paintHeader(width));
+    // Build output as a line array so we can track cursor position.
+    const lines: string[] = [];
+    const pushLines = (s: string): void => { for (const l of s.split('\n')) lines.push(l); };
+
+    pushLines(this.paintHeader(width));
     const bodyH = Math.max(4, height - 6);
-    parts.push(this.paintBody(width, bodyH));
-    parts.push(this.paintInputLine(width));
-    parts.push(this.paintStatusBar(width));
-    process.stdout.write(frame + parts.join('\n') + SHOW_CURSOR);
+    pushLines(this.paintBody(width, bodyH));
+
+    // The input cursor sits at the end of the prompt text ("> …") on the
+    // first line of the input area.
+    const inputParts = this.paintInputLine(width).split('\n');
+    const inputRow = lines.length;
+    for (const l of inputParts) lines.push(l);
+    const inputCol = (inputParts[0] ?? '').replace(/\x1b\[[0-9;]*m/g, '').length;
+
+    pushLines(this.paintStatusBar(width));
+
+    const visible = lines.slice(0, height);
+    const cursorRow = Math.min(Math.max(inputRow, 0), height - 1);
+    process.stdout.write(frame + visible.join('\n') + cursorTo(inputCol, cursorRow) + SHOW_CURSOR);
   }
 
   private paintHeader(width: number): string {
@@ -583,7 +601,14 @@ export class TerminalUI implements TuiHost {
     const title = paint(' LUICode ', ACCENT, 'bold') + paint('Plan. Build. Test. Ship.', DIM);
     const center = `${paint('Project:', DIM)} ${this.opts.projectName}  ${paint('Mode:', DIM)} ${paint(this.mode.toUpperCase(), modeColor, 'bold')}`;
     const w = width - (title.length + center.length);
-    return title + (w > 0 ? ' '.repeat(Math.max(1, w)) : ' ') + center + '\n' + paint('─'.repeat(width), DIM) + '\n';
+    const line1 = title + (w > 0 ? ' '.repeat(Math.max(1, w)) : ' ') + center;
+
+    const models = this.opts.config.models ?? {};
+    const provider = this.opts.config.provider;
+    const coder = models.coder ?? '—';
+    const modelInfo = `${paint('  Provider:', DIM)} ${paint(provider, ACCENT)}  ${paint('Coder:', DIM)} ${paint(coder, ACCENT)}`;
+
+    return line1 + '\n' + modelInfo + '\n' + paint('─'.repeat(width), DIM) + '\n';
   }
 
   private paintBody(width: number, available: number): string {
@@ -628,6 +653,11 @@ export class TerminalUI implements TuiHost {
       push('');
     }
     if (!this.lines.length && this.focus === 'conversation') {
+      const models = this.opts.config.models ?? {};
+      const provider = this.opts.config.provider;
+      const coder = models.coder ?? '—';
+      push(paint(`  Model: ${provider} / ${coder}`, ACCENT));
+      push('');
       push(paint('Ask LUICode to inspect, plan, and implement a change for this project.', DIM));
       push(paint('Ctrl+P palette · Ctrl+H help · Ctrl+O auto · Ctrl+M models · Ctrl+R sessions', DIM));
       push(paint('Agent controls (busy): Space pause · R retry · S skip · F fix · Y approve · N reject', DIM));
@@ -790,7 +820,8 @@ function shortArgs(args: string): string {
 export function printWelcome(opts: { projectName: string; mode: string; model: string; autoBoundary?: boolean }): void {
   process.stdout.write(
     `${paint('╭ ' + 'LUICode', ACCENT, 'bold')} — Plan. Build. Test. Ship.${RESET}\n` +
-      `  Project: ${opts.projectName}   Mode: ${opts.mode}   Route: ${opts.model}\n` +
+      `  Project: ${opts.projectName}   Mode: ${opts.mode}\n` +
+      `  Model:   ${paint(opts.model, ACCENT, 'bold')}\n` +
       (opts.autoBoundary === true ? `  Workspace-only autonomy: true\n` : ``) +
       `  Home: ~/.luicode/config.yaml   Project: .luicode/config.yaml\n`
   );
