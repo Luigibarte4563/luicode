@@ -76,8 +76,10 @@ function configCandidates(cwd: string): string[] {
   const base = path.join(home, '.luicode');
   const project = path.join(cwd, '.luicode');
   return [
+    path.join(base, 'settings.lock.json'),
     path.join(base, 'config.yaml'),
     path.join(base, 'config.json'),
+    path.join(project, 'settings.lock.json'),
     path.join(project, 'config.yaml'),
     path.join(project, 'config.json')
   ];
@@ -104,11 +106,20 @@ export function configProjectFile(cwd: string): string {
   return path.join(cwd, '.luicode', 'config.yaml');
 }
 
+export function settingsLockFile(cwd: string): string {
+  return path.join(cwd, '.luicode', 'settings.lock.json');
+}
+
+export function userSettingsLockFile(): string {
+  return path.join(os.homedir(), '.luicode', 'settings.lock.json');
+}
+
 export function readConfigFile(file: string): Record<string, unknown> | null {
   return parseFile(file);
 }
 
 export function writeConfigFile(file: string, data: Record<string, unknown>): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, YAML.stringify(data));
+  const out = file.endsWith('.json') ? JSON.stringify(data, null, 2) : YAML.stringify(data);
+  fs.writeFileSync(file, out);
 }

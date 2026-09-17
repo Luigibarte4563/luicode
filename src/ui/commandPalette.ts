@@ -33,6 +33,10 @@ export class CommandPalette {
     return this.ctx !== null;
   }
 
+  get queryText(): string {
+    return this.query;
+  }
+
   open(ctx: CommandContext): void {
     this.ctx = ctx;
     this.query = '';

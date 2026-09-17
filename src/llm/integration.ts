@@ -1,9 +1,11 @@
+import * as fs from 'fs';
 import { LuicodeConfig, ModelReply, ProviderConfig, ProviderInfo, ProviderKind, TaskKind } from '../types';
 import {
   DEFAULT_CONFIG,
   configProjectFile,
   configUserFile,
   readConfigFile,
+  settingsLockFile,
   writeConfigFile
 } from '../config/schema';
 import { createProvider } from './factory';
@@ -135,7 +137,14 @@ export function saveConfigChanges(
   opts: { scope?: ConfigScope; cwd?: string } = {}
 ): string {
   const scope = opts.scope ?? 'user';
-  const file = scope === 'local' ? configProjectFile(opts.cwd ?? process.cwd()) : configUserFile();
+  const cwd = opts.cwd ?? process.cwd();
+  let file: string;
+  if (scope === 'local') {
+    // Prefer the model-lock pattern (.luicode/settings.lock.json) when it exists.
+    file = fs.existsSync(settingsLockFile(cwd)) ? settingsLockFile(cwd) : configProjectFile(cwd);
+  } else {
+    file = configUserFile();
+  }
   const existing = readConfigFile(file) ?? {};
   const merged: Record<string, unknown> = { ...existing };
   if (changes.provider !== undefined) merged.provider = changes.provider;

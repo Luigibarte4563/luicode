@@ -29,6 +29,12 @@ pipeline that keeps the human in the loop where it matters.
   default to script-suppressed installs, and are always followed by a lockfile
   or equivalent verification step. Per-project `adapters` config overrides the
   commands.
+- **Multi-file config precedence** — settings deep-merge from built-in
+  defaults, `~/.luicode/`, and `.luicode/`, with `settings.lock.json` (user and
+  project) sitting at the top of the priority chain. The project model lock —
+  `.luicode/settings.lock.json`, copied from `.luicode.example/` — is the
+  idiomatic way to pin planner/coder/reviewer/fallback models per repository
+  (see MODEL_SETUP.md). `luicode model … --local` writes there when present.
 - **From-scratch builds** — empty workspaces get an official-scaffolder step,
   a re-inspection step after scaffolding, then edits. When the task names no
   stack, the first step is a `blocked` "confirm the technology stack" step
@@ -200,7 +206,7 @@ tools (`git_status`, `git_diff`, `git_log`, `git_branch`) when git is enabled.
 ## 5. Verification & testing
 
 Every component ships with unit tests and fast-check property tests
-(`npm test` — 155 tests, 11 suites). The GeneratorAgent's eval harness
+(`npm test` — 157 tests, 11 suites). The GeneratorAgent's eval harness
 re-runs the spec's five canonical test cases on every change:
 
 - `Write a Python script for a web scraper` → `code`
