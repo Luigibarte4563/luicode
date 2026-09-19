@@ -67,7 +67,6 @@ export interface VectorStoreConfig {
   chunkOverlap: number;
   maxFileSizeBytes: number;
   topK: number;
-  indexDir: string;
   extensions: string[];
   excludeDirs: string[];
 }
@@ -308,4 +307,16 @@ export interface ToolContext {
   agent: unknown;
   config: LuicodeConfig;
   permission: unknown;
+}
+
+export interface FileOperation {
+  action: 'create' | 'modify' | 'delete';
+  path: string;
+  content?: string; // for create/modify
+  oldContent?: string; // for modify (optional, for diff)
+}
+
+export interface MultiFileOutput {
+  operations: FileOperation[];
+  summary?: string;
 }
