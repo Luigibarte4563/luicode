@@ -214,7 +214,6 @@ class PythonEditStrategy implements EditStrategy {
 
     // Collect lines of this block: the declaration line + subsequent lines with
     // deeper indentation (or blank lines that are within the block).
-    const beforeBlock = source.slice(0, blockStart);
     const fromBlock = source.slice(blockStart);
     const lines = fromBlock.split('\n');
 
@@ -300,6 +299,235 @@ function getStrategy(filePath: string): EditStrategy | null {
   if (ext === '.py') return new PythonEditStrategy();
   if (ext === '.json') return new JsonEditStrategy();
   return null;
+}
+
+/**
+ * Analyze a TypeScript/JavaScript file to find exported declarations.
+ * Returns information about what the file exports (functions, classes, interfaces, etc.).
+ */
+export interface AnalyzeExportsArgs {
+  path: string; // relative to workspace root
+}
+
+export interface AnalyzeExportsResult {
+  ok: boolean;
+  message?: string;
+  exports?: Array<{
+    name: string;
+    type: 'function' | 'class' | 'interface' | 'type' | 'enum' | 'variable' | 'module';
+    isExported: boolean;
+    line: number;
+    character: number;
+  }>;
+}
+
+/**
+ * Collect exported declarations from a TS source file.
+ */
+function collectExportedDeclarations(sourceFile: ts.SourceFile): Array<{
+  name: string;
+  type: 'function' | 'class' | 'interface' | 'type' | 'enum' | 'variable' | 'module';
+  isExported: boolean;
+  line: number;
+  character: number;
+}> {
+  const exports: Array<{
+    name: string;
+    type: 'function' | 'class' | 'interface' | 'type' | 'enum' | 'variable' | 'module';
+    isExported: boolean;
+    line: number;
+    character: number;
+  }> = [];
+
+  const visitNode = (node: ts.Node) => {
+    // Check for each declaration type and export status
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      const isExported = !!(
+        node.modifiers &&
+        node.modifiers.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+      );
+      const pos = node.getStart(sourceFile);
+      const lineChar = sourceFile.getLineAndCharacterOfPosition(pos);
+      exports.push({
+        name: node.name.getText(sourceFile),
+        type: 'function',
+        isExported,
+        line: lineChar.line + 1,
+        character: lineChar.character + 1
+      });
+    } else if (ts.isClassDeclaration(node) && node.name) {
+      const isExported = !!(
+        node.modifiers &&
+        node.modifiers.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+      );
+      const pos = node.getStart(sourceFile);
+      const lineChar = sourceFile.getLineAndCharacterOfPosition(pos);
+      exports.push({
+        name: node.name.getText(sourceFile),
+        type: 'class',
+        isExported,
+        line: lineChar.line + 1,
+        character: lineChar.character + 1
+      });
+    } else if (ts.isInterfaceDeclaration(node) && node.name) {
+      const isExported = !!(
+        node.modifiers &&
+        node.modifiers.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+      );
+      const pos = node.getStart(sourceFile);
+      const lineChar = sourceFile.getLineAndCharacterOfPosition(pos);
+      exports.push({
+        name: node.name.getText(sourceFile),
+        type: 'interface',
+        isExported,
+        line: lineChar.line + 1,
+        character: lineChar.character + 1
+      });
+    } else if (ts.isTypeAliasDeclaration(node) && node.name) {
+      const isExported = !!(
+        node.modifiers &&
+        node.modifiers.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+      );
+      const pos = node.getStart(sourceFile);
+      const lineChar = sourceFile.getLineAndCharacterOfPosition(pos);
+      exports.push({
+        name: node.name.getText(sourceFile),
+        type: 'type',
+        isExported,
+        line: lineChar.line + 1,
+        character: lineChar.character + 1
+      });
+    } else if (ts.isEnumDeclaration(node) && node.name) {
+      const isExported = !!(
+        node.modifiers &&
+        node.modifiers.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+      );
+      const pos = node.getStart(sourceFile);
+      const lineChar = sourceFile.getLineAndCharacterOfPosition(pos);
+      exports.push({
+        name: node.name.getText(sourceFile),
+        type: 'enum',
+        isExported,
+        line: lineChar.line + 1,
+        character: lineChar.character + 1
+      });
+    } else if (ts.isVariableStatement(node)) {
+      // Check if it's a const/let/var declaration that might be exported
+      const isExported = !!(
+        node.modifiers &&
+        node.modifiers.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+      );
+      const pos = node.getStart(sourceFile);
+      const lineChar = sourceFile.getLineAndCharacterOfPosition(pos);
+      for (const decl of node.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name)) {
+          exports.push({
+            name: decl.name.getText(sourceFile),
+            type: 'variable',
+            isExported,
+            line: lineChar.line + 1,
+            character: lineChar.character + 1
+          });
+        }
+      }
+    } else if (ts.isModuleDeclaration(node) && node.name) {
+      const isExported = !!(
+        node.modifiers &&
+        node.modifiers.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+      );
+      const pos = node.getStart(sourceFile);
+      const lineChar = sourceFile.getLineAndCharacterOfPosition(pos);
+      exports.push({
+        name: node.name.getText(sourceFile),
+        type: 'module',
+        isExported,
+        line: lineChar.line + 1,
+        character: lineChar.character + 1
+      });
+    }
+
+    // Recursively visit children
+    ts.forEachChild(node, visitNode);
+  };
+
+  // Visit all top-level nodes
+  for (const stmt of sourceFile.statements) {
+    visitNode(stmt);
+  }
+
+  // Also check for export statements like "export { foo }" or "export * from './foo'"
+  // This is a simplified check - a full implementation would parse export declarations
+  for (const stmt of sourceFile.statements) {
+    if (ts.isExportDeclaration(stmt)) {
+      // Handle export declarations
+      if (stmt.exportClause) {
+        // Named exports: export { foo, bar }
+        if (ts.isNamedExports(stmt.exportClause)) {
+          for (const element of stmt.exportClause.elements) {
+            const name = element.propertyName ?? element.name;
+            if (ts.isIdentifier(name)) {
+              const pos = name.getStart(sourceFile);
+              const lineChar = sourceFile.getLineAndCharacterOfPosition(pos);
+              exports.push({
+                name: name.getText(sourceFile),
+                type: 'variable', // We don't know the exact type without looking up the original
+                isExported: true,
+                line: lineChar.line + 1,
+                character: lineChar.character + 1
+              });
+            }
+          }
+        }
+      }
+      // TODO: Handle export * from './foo' and export default
+    } else if (ts.isExportAssignment(stmt)) {
+      // export default ...
+      // For simplicity, we'll skip detailed handling of export default
+    }
+  }
+
+  return exports;
+}
+
+export async function analyzeExports(args: AnalyzeExportsArgs, rt: ToolRuntime): Promise<string> {
+  const rel = args.path;
+
+  let source: string;
+  try {
+    source = rt.ws.readFile(rel);
+  } catch (e) {
+    return `ERROR: could not read file ${rel}: ${String(e)}`;
+  }
+
+  const strategy = getStrategy(rel);
+  if (!strategy) {
+    return `ERROR: unsupported file type for analyze_exports: ${path.extname(rel)}`;
+  }
+
+  // For TypeScript/JavaScript files, we can do proper AST analysis
+  if (['.ts', '.tsx', '.js', '.jsx'].includes(path.extname(rel).toLowerCase())) {
+    const fileName = path.basename(rel);
+    const sourceFile = ts.createSourceFile(
+      fileName,
+      source,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ true
+    );
+
+    const exports = collectExportedDeclarations(sourceFile);
+
+    return JSON.stringify({
+      ok: true,
+      exports: exports
+    }, null, 2);
+  }
+
+  // For other file types, fall back to basic info
+  return JSON.stringify({
+    ok: true,
+    exports: [],
+    message: `Export analysis not implemented for ${path.extname(rel)} files. Only TypeScript/JavaScript is supported for detailed analysis.`
+  }, null, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +637,17 @@ export const astTools: Tool[] = [
       if (!startLine) return 'ERROR: missing or invalid "startLine" argument';
       if (!endLine) return 'ERROR: missing or invalid "endLine" argument';
       return lineEdit({ path: p, startLine, endLine, newContent }, rt);
+    }
+  },
+  {
+    name: 'analyze_exports',
+    description:
+      'Analyze a TypeScript/JavaScript file to find exported declarations (functions, classes, interfaces, etc.). ' +
+      'Args: { path }',
+    async run(args, rt) {
+      const p = String(args.path ?? args.file ?? '');
+      if (!p) return 'ERROR: missing "path" argument';
+      return analyzeExports({ path: p }, rt);
     }
   }
 ];
