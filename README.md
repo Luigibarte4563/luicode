@@ -146,11 +146,9 @@ locally and configure its backend separately.
 luicode --plan "list the files in this project"
 ```
 
-LUICode will inspect the workspace and print a plan (writing it to `plan.md`)
+LUICode will inspect the workspace and produce a plan (writes plan.md only)
 without modifying any source files. If it responds successfully, your provider
 and API key are configured correctly.
-
----
 
 ## Usage
 
@@ -182,7 +180,8 @@ needed." and press **Ctrl+Enter** (or Enter).
 | `Ctrl+P` | Open the **command palette** (fuzzy search, Enter runs) |
 | `Ctrl+C` | Stop the running agent (when idle, exits) |
 | `Ctrl+R` | **Session picker** (resume / new / rename / delete) |
-| `Ctrl+M` | **Model manager** (roles ⇄ providers, test in place) |
+| `Ctrl+H` | Help (`/help`), `?` opens shortcuts too |
+| `Ctrl+M` | Model manager (roles ⇄ providers, test in place) |
 | `Ctrl+H` | Help (`/help`), `?` opens shortcuts too |
 | `Ctrl+D` | Focus the diff panel / show Git diff |
 | `Ctrl+G` | Git status |
@@ -229,8 +228,8 @@ palette entry. All of them call the same implementation, so the safety layer
 `/permissions`, `/tools`, `/config`, `/resume`, `/new`, `/quit`.
 
 **Plan approval (checkboxes):** when a plan is up for approval in `manual`
-mode, use `↑`/`↓` to move, `Space` to toggle a single step, `A` to select all
-steps, `Enter` to approve, and `N` / `Esc` to reject. Skipped steps stay out
+mode, use `↑`/`↓` to move, `Space` to toggle a single step, `A` selects all,
+`Enter` to approve, and `N` / `Esc` to reject. Skipped steps stay out
 of the run. From the agent controls, `Y` approves the *next* approval gate and
 `N` rejects/skips it.
 
@@ -346,7 +345,7 @@ adapters:
 scaffold / lockfile / verify commands of any adapter in the registry,
 per project.
 
-### Providers
+## Providers
 
 | Provider | Kind | API key env var | Notes |
 | --- | --- | --- | --- |
@@ -356,9 +355,9 @@ per project.
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | Many models |
 | Groq | `groq` | `GROQ_API_KEY` | Fast/cheap |
 | DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | |
-| Qwen (DashScope) | `qwen` | `DASHSCOPE_API_KEY` | qwen-coder-plus |
+| Qwen | `qwen` | `DASHSCOPE_API_KEY` | qwen-coder-plus |
 | Together | `together` | `TOGETHER_API_KEY` | |
-| GitHub Models | `github` | `GITHUB_TOKEN` | Free tier |
+| GitHub | `github` | `GITHUB_TOKEN` | Free tier |
 | Ollama | `ollama` | — | Free, runs locally (e.g. `llama3.1`) |
 | vLLM | `vllm` | — | Serves open models at `http://localhost:8000` |
 | LiteLLM proxy | `litellm` | — | Any backend via local proxy (`http://localhost:4000`) |
@@ -406,3 +405,20 @@ npm test           # jest
 Public API is exported from `src/index.ts` (`Workspace`, `Agent`,
 `ModelRouter`, `SecurityScanner`, `DiffEngine`, `SessionManager`, …) so LUICode
 can be embedded in other tools.
+
+## Recent Improvements
+
+Enhanced the GeneratorAgent to support structured multi-file output for large code generation:
+- Added `FileOperation` and `MultiFileOutput` interfaces in `src/types.ts`
+- Modified `src/agent/GeneratorAgent.ts` to output structured JSON representing multiple file operations
+- Accumulate file operations across reasoning steps
+- Added per-file verification and correction passes
+- Improved handling of ARGS parsing and payload extraction
+
+Added web server UI for configuration and monitoring:
+- Created `src/server/server.ts` with Express-based LuicodeServer class
+- Implemented REST API endpoints for status, project info, config, providers, models, sessions, files, and git status
+- Added static file serving for SPA UI with tabs for Providers, Models, Messaging, Integrations, and Session
+- Created `public/` directory with HTML/CSS/JS for the interactive web interface
+- Added `luicode server` command to both CLI and interactive UI
+- Fixed TypeScript errors in Project Understanding Mode implementation

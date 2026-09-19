@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LUICode Server UI</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>LUICode Server</h1>
+            <div class="status-indicator" id="status">Connected</div>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="providers">Providers</button>
+            <button class="tab-btn" data-tab="models">Models</button>
+            <button class="tab-btn" data-tab="messaging">Messaging</button>
+            <button class="tab-btn" data-tab="integrations">Integrations</button>
+            <button class="tab-btn" data-tab="session">Session</button>
+        </nav>
+
+        <div class="tab-content">
+            <!-- Providers Tab -->
+            <div id="providers" class="tab-pane active">
+                <h2>API Providers</h2>
+                <div class="form-group">
+                    <label for="anthropic-key">Anthropic API Key:</label>
+                    <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+                    <button class="btn btn-primary" id="save-anthropic">Save</button>
+                </div>
+                <div class="form-group">
+                    <label for="openai-key">OpenAI API Key:</label>
+                    <input type="password" id="openai-key" placeholder="sk-...">
+                    <button class="btn btn-primary" id="save-openai">Save</button>
+                </div>
+                <div class="form-group">
+                    <label for="ollama-url">Ollama URL:</label>
+                    <input type="text" id="ollama-url" value="http://localhost:11434">
+                    <button class="btn btn-primary" id="test-ollama">Test Connection</button>
+                </div>
+            </div>
+
+            <!-- Models Tab -->
+            <div id="models" class="tab-pane">
+                <h2>Model Configuration</h2>
+                <div class="config-grid">
+                    <div class="config-card">
+                        <h3>Planner Model</h3>
+                        <p>Responsible for planning and reasoning</p>
+                        <select id="planner-model">
+                            <option value="anthropic/claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="openai/gpt-4o">GPT-4o</option>
+                            <option value="ollama/llama3.1">Llama 3.1 (Ollama)</option>
+                        </select>
+                        <button class="btn btn-sm" id="update-planner">Update</button>
+                    </div>
+
+                    <div class="config-card">
+                        <h3>Coder Model</h3>
+                        <p>Responsible for code generation</p>
+                        <select id="coder-model">
+                            <option value="anthropic/claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                            <option value="ollama/llama3.1">Llama 3.1 (Ollama)</option>
+                        </select>
+                        <button class="btn btn-sm" id="update-coder">Update</button>
+                    </div>
+
+                    <div class="config-card">
+                        <h3>Reviewer Model</h3>
+                        <p>Responsible for code review</p>
+                        <select id="reviewer-model">
+                            <option value="anthropic/claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="openai/gpt-4o">GPT-4o</option>
+                            <option value="ollama/llama3.1">Llama 3.1 (Ollama)</option>
+                        </select>
+                        <button class="btn btn-sm" id="update-reviewer">Update</button>
+                    </div>
+
+                    <div class="config-card">
+                        <h3>Fallback Model</h3>
+                        <p>Used when primary providers fail</p>
+                        <select id="fallback-model">
+                            <option value="ollama/llama3.1">Llama 3.1 (Ollama)</option>
+                            <option value="anthropic/claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="openai/gpt-4o">GPT-4o</option>
+                        </select>
+                        <button class="btn btn-sm" id="update-fallback">Update</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Messaging Tab -->
+            <div id="messaging" class="tab-pane">
+                <h2>Agent Messaging</h2>
+                <div class="messaging-container">
+                    <div id="message-log" class="message-log">
+                        <!-- Messages will appear here -->
+                    </div>
+                </div>
+                <div class="input-group">
+                    <input type="text" id="message-input" placeholder="Type a message...">
+                    <button class="btn" id="send-message">Send</button>
+                </div>
+            </div>
+
+            <!-- Integrations Tab -->
+            <div id="integrations" class="tab-pane">
+                <h2>Integrations & Tools</h2>
+                <div class integrations-grid>
+                    <div class="integration-card">
+                        <h3>File System</h3>
+                        <p>Read, write, edit files in workspace</p>
+                        <span class="status status-active">Active</span>
+                    </div>
+                    <div class="integration-card">
+                        <h3>Git</h3>
+                        <p>Version control operations</p>
+                        <span class="status status-active">Active</span>
+                    </div>
+                    <div class="integration-card">
+                        <h3>Shell Tools</h3>
+                        <p>Run terminal commands</p>
+                        <span class="status status-active">Active</span>
+                    </div>
+                    <div class="integration-card">
+                        <h3>AST Tools</h3>
+                        <p>Code manipulation and refactoring</p>
+                        <span class="status status-active">Active</span>
+                    </div>
+                    <div class="integration-card">
+                        <h3>Memory System</h3>
+                        <p>Working memory and session persistence</p>
+                        <span class="status status-active">Active</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Session Tab -->
+            <div id="session" class="tab-pane">
+                <h2>Current Session</h2>
+                <div class="session-info">
+                    <div class="info-row">
+                        <span class="label">Workspace:</span>
+                        <span class="value" id="workspace-path">Loading...</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Session ID:</span>
+                        <span class="value" id="session-id">Loading...</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Current Task:</span>
+                        <span class="value" id="current-task">Loading...</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Files Modified:</span>
+                        <span class="value" id="files-modified">0</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="label">Tests Run:</span>
+                        <span class="value" id="tests-run">0</span>
+                    </div>
+                </div>
+
+                <h3>Recent Files</h3>
+                <div id="recent-files" class="file-list">
+                    <!-- Recent files will appear here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

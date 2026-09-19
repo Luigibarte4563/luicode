@@ -3,6 +3,8 @@ import { ModelRouter } from '../router/ModelRouter';
 import { Workspace } from '../workspace/Workspace';
 import { ProjectProfile, inspectProject } from '../workspace/inspector';
 import { Adapter, adapterForProfile, adapterNamed, adaptersContext } from './adapters';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface PlannerInput {
   task: string;
@@ -18,6 +20,20 @@ export interface PlanStepSpec {
   action?: string;
   why?: string;
   risk?: PlanTier;
+}
+
+interface ProjectUnderstanding {
+  framework: string;
+  language: string;
+  packageManager: string;
+  entryPoints: string[];
+  architecture: {
+    patterns: string[];
+    structure: Record<string, string[]>; // directory -> files
+  };
+  dependencies: Record<string, string>;
+  importantFiles: string[];
+  potentialIssues: string[];
 }
 
 export interface PlanEnvironment {
@@ -67,6 +83,130 @@ export class Planner {
     return this.buildPlan(input, env);
   }
 
+  /**
+   * Loads project understanding from .luicode/project-map.md if available
+   */
+  private async loadProjectUnderstanding(ws: Workspace): Promise<ProjectUnderstanding | null> {
+    try {
+      const projectMapPath = path.join(ws.root, '.luicode', 'project-map.md');
+      if (!ws.absoluteExists(projectMapPath)) {
+        return null;
+      }
+
+      const content = ws.readFile(projectMapPath);
+      if (!content) {
+        return null;
+      }
+
+      // Parse the project map to extract structured data
+      // This is a simplified parser - in a full implementation, we would parse the markdown more thoroughly
+      const understanding: ProjectUnderstanding = {
+        framework: 'Unknown',
+        language: 'Unknown',
+        packageManager: 'Unknown',
+        entryPoints: [],
+        architecture: {
+          patterns: [],
+          structure: {}
+        },
+        dependencies: {},
+        importantFiles: [],
+        potentialIssues: []
+      };
+
+      // Extract basic info from the project map
+      const lines = content.split('\n');
+      for (const line of lines) {
+        if (line.includes('**Framework:**')) {
+          understanding.framework = line.split('**Framework:**')[1].trim();
+        } else if (line.includes('**Language:**')) {
+          understanding.language = line.split('**Language:**')[1].trim();
+        } else if (line.includes('**Package Manager:**')) {
+          understanding.packageManager = line.split('**Package Manager:**')[1].trim();
+        }
+      }
+
+      // Extract patterns
+      const patternsStart = content.indexOf('## Architecture');
+      if (patternsStart !== -1) {
+        const patternsSection = content.substring(patternsStart);
+        const patternsEnd = patternsSection.indexOf('\n## ');
+        const patternsContent = patternsEnd !== -1
+          ? patternsSection.substring(0, patternsEnd)
+          : patternsSection;
+
+        const patternLines = patternsContent.split('\n')
+          .filter(line => line.trim().startsWith('✓'))
+          .map(line => line.substring(2).trim());
+        understanding.architecture.patterns = patternLines;
+      }
+
+      // Extract important files
+      const importantFilesStart = content.indexOf('## Important Files');
+      if (importantFilesStart !== -1) {
+        const importantFilesSection = content.substring(importantFilesStart);
+        const importantFilesEnd = importantFilesSection.indexOf('\n## ');
+        const importantFilesContent = importantFilesEnd !== -1
+          ? importantFilesSection.substring(0, importantFilesEnd)
+          : importantFilesSection;
+
+        const importantFileLines = importantFilesContent.split('\n')
+          .filter(line => line.trim().startsWith('✓'))
+          .map(line => line.substring(2).trim());
+        understanding.importantFiles = importantFileLines;
+      }
+
+      // Extract dependencies
+      const depsStart = content.indexOf('## Dependencies');
+      if (depsStart !== -1) {
+        const depsSection = content.substring(depsStart);
+        const depsEnd = depsSection.indexOf('\n## ');
+        const depsContent = depsEnd !== -1
+          ? depsSection.substring(0, depsEnd)
+          : depsSection;
+
+        const depLines = depsContent.split('\n')
+          .filter(line => line.trim().startsWith('✓'))
+          .map(line => line.substring(2).trim());
+
+        // Parse dependency lines like "✓ react 18.2.0"
+        for (const depLine of depLines) {
+          const parts = depLine.split(' ');
+          if (parts.length >= 2) {
+            const depName = parts[0];
+            const depVersion = parts[1];
+            // Check if it's a dev dependency
+            const isDev = depLine.includes('(dev)');
+            if (!isDev) {
+              understanding.dependencies[depName] = depVersion;
+            }
+            // For simplicity, we're putting all in dependencies; could split into devDependencies if needed
+          }
+        }
+      }
+
+      // Extract potential issues
+      const issuesStart = content.indexOf('## Potential Issues');
+      if (issuesStart !== -1) {
+        const issuesSection = content.substring(issuesStart);
+        const issuesEnd = issuesSection.indexOf('\n## ');
+        const issuesContent = issuesEnd !== -1
+          ? issuesSection.substring(0, issuesEnd)
+          : issuesSection;
+
+        const issueLines = issuesContent.split('\n')
+          .filter(line => line.trim().startsWith('⚠'))
+          .map(line => line.substring(2).trim());
+        understanding.potentialIssues = issueLines;
+      }
+
+      return understanding;
+    } catch (error) {
+      // If we fail to load or parse, return null to fall back to standard planning
+      return null;
+    }
+  }
+
   private async evaluate(input: PlannerInput, profile: ProjectProfile): Promise<PlanEnvironment> {
     const context = this.projectContext(input.ws, profile, input.task, input.adapters);
     const messages: ModelMessage[] = [
@@ -113,9 +253,35 @@ export class Planner {
   }
 
   private staticWebPlan(input: PlannerInput, profile: ProjectProfile): PlanEnvironment {
+    // Load project understanding if available
+    const projectUnderstanding = this.loadProjectUnderstanding(input.ws);
+
+    // Generate the implementation step title and action
+    let implementationTitle = `Create the ${shorten(input.task)} implementation`;
+    let implementationAction = 'Write the page markup, styles and behaviour into the scaffolded files';
+    let implementationWhy = 'Deliver the requested feature on top of the scaffold';
+
+    // If we have project understanding, make the implementation step more specific
+    if (projectUnderstanding) {
+      // Check if there are existing files that might be relevant to the task
+      const relevantFiles = this.findRelevantFiles(input.task, projectUnderstanding);
+
+      if (relevantFiles.length > 0) {
+        // We found existing files that might be related to the task
+        implementationTitle = `Extend existing ${input.task} implementation`;
+        implementationAction = `Modify existing files: ${relevantFiles.join(', ')}`;
+        implementationWhy = `Leverage existing implementations rather than creating duplicates`;
+      } else {
+        // No existing relevant files found, but we can still provide some guidance
+        implementationTitle = `Create new ${input.task} implementation`;
+        implementationAction = `Create new files in appropriate directories based on project structure`;
+        implementationWhy = `Follow existing project patterns and conventions`;
+      }
+    }
+
     const steps: PlanStepSpec[] = [
       { title: 'Create the static site scaffold (index.html, style.css, script.js)', stepType: 'edit', action: 'Create index.html, style.css and script.js with minimal canonical content', risk: 'modify', why: 'Static sites have no official scaffolder; the vanilla three-file layout is the conventional starting point' },
-      { title: `Create the ${shorten(input.task)} implementation`, stepType: 'edit', action: 'Write the page markup, styles and behaviour into the scaffolded files', risk: 'modify', why: 'Deliver the requested feature on top of the scaffold' },
+      { title: implementationTitle, stepType: 'edit', action: implementationAction, risk: 'modify', why: implementationWhy },
       { title: 'Add focused tests for the new behavior', stepType: 'edit', action: 'Write test files', risk: 'modify', why: 'Validate behavior automatically' }
     ];
     return {
@@ -165,14 +331,40 @@ export class Planner {
   }
 
   private proposeStackPlan(input: PlannerInput, profile: ProjectProfile): PlanEnvironment {
+    // Load project understanding if available
+    const projectUnderstanding = this.loadProjectUnderstanding(input.ws);
+
+    // Generate the implementation step title and action
+    let implementationTitle = `Create the ${shorten(input.task)} implementation`;
+    let implementationAction = 'Create or modify source files';
+    let implementationWhy = 'Deliver the requested feature';
+
+    // If we have project understanding, make the implementation step more specific
+    if (projectUnderstanding) {
+      // Check if there are existing files that might be relevant to the task
+      const relevantFiles = this.findRelevantFiles(input.task, projectUnderstanding);
+
+      if (relevantFiles.length > 0) {
+        // We found existing files that might be related to the task
+        implementationTitle = `Extend existing ${input.task} implementation`;
+        implementationAction = `Modify existing files: ${relevantFiles.join(', ')}`;
+        implementationWhy = `Leverage existing implementations rather than creating duplicates`;
+      } else {
+        // No existing relevant files found, but we can still provide some guidance
+        implementationTitle = `Create new ${input.task} implementation`;
+        implementationAction = `Create new files in appropriate directories based on project structure`;
+        implementationWhy = `Follow existing project patterns and conventions`;
+      }
+    }
+
     const adapter = adapterNamed('node-npm')!;
     const steps: PlanStepSpec[] = [
-      { title: 'Confirm the technology stack before scaffolding', stepType: 'review', action: 'Present a proposed stack (e.g. Next.js + TypeScript on node-npm) and components for approval', risk: 'blocked', why: 'The task does not name a framework; a guess would be baked into every later step' },
+      { title: 'Confirm the technology stack before scaffoding', stepType: 'review', action: 'Present a proposed stack (e.g. Next.js + TypeScript on node-npm) and components for approval', risk: 'blocked', why: 'The task does not name a framework; a guess would be baked into every later step' },
       { title: 'Scaffold the project with the selected stack official scaffolder', stepType: 'scaffold', action: 'Official scaffolding CLI for the approved stack', risk: 'modify', why: 'Start from canonical project conventions' },
       { title: 'Re-inspect the scaffolded project', stepType: 'review', action: 'Inspect the generated files before editing', risk: 'safe', why: 'Plan edits against what the scaffolder produced' },
       { title: 'Install the declared dependencies', stepType: 'install', action: adapter.install, risk: 'modify+network', why: 'Pull in declared dependencies, script-suppressed by default' },
       { title: 'Confirm the lockfile was written', stepType: 'review', action: `${adapter.verify}; check package-lock.json was created`, risk: 'safe', why: 'Partial installs can still exit clean' },
-      { title: `Create the ${shorten(input.task)} implementation`, stepType: 'edit', action: 'Create or modify source files', risk: 'modify', why: 'Deliver the requested feature' },
+      { title: implementationTitle, stepType: 'edit', action: implementationAction, risk: 'modify', why: implementationWhy },
       { title: 'Add focused tests for the new behavior', stepType: 'edit', action: 'Write test files', risk: 'modify', why: 'Validate behavior automatically' },
       { title: `Run the ${adapter.test} suite and fix failures`, stepType: 'run', action: adapter.test, risk: 'modify', why: 'Verify the implementation' }
     ];
@@ -187,9 +379,35 @@ export class Planner {
   }
 
   private existingProjectPlan(input: PlannerInput, profile: ProjectProfile, adapter: Adapter | null): PlanEnvironment {
+    // Load project understanding if available
+    const projectUnderstanding = this.loadProjectUnderstanding(input.ws);
+
+    // Generate the implementation step title and action
+    let implementationTitle = `Create the ${shorten(input.task)} implementation`;
+    let implementationAction = 'Create or modify source files';
+    let implementationWhy = 'Deliver the requested behavior';
+
+    // If we have project understanding, make the implementation step more specific
+    if (projectUnderstanding) {
+      // Check if there are existing files that might be relevant to the task
+      const relevantFiles = this.findRelevantFiles(input.task, projectUnderstanding);
+
+      if (relevantFiles.length > 0) {
+        // We found existing files that might be related to the task
+        implementationTitle = `Extend existing ${input.task} implementation`;
+        implementationAction = `Modify existing files: ${relevantFiles.join(', ')}`;
+        implementationWhy = `Leverage existing implementations rather than creating duplicates`;
+      } else {
+        // No existing relevant files found, but we can still provide some guidance
+        implementationTitle = `Create new ${input.task} implementation`;
+        implementationAction = `Create new files in appropriate directories based on project structure`;
+        implementationWhy = `Follow existing project patterns and conventions`;
+      }
+    }
+
     const steps: PlanStepSpec[] = [
       { title: `Analyze existing ${profile.framework || 'application'} architecture and locate integration points`, stepType: 'review', risk: 'safe', why: 'Ground changes in the existing structure' },
-      { title: `Create the ${shorten(input.task)} implementation`, stepType: 'edit', action: 'Create or modify source files', risk: 'modify', why: 'Deliver the requested behavior' },
+      { title: implementationTitle, stepType: 'edit', action: implementationAction, risk: 'modify', why: implementationWhy },
       { title: 'Add focused tests covering the new behavior', stepType: 'edit', action: 'Write test files', risk: 'modify', why: 'Validate the new behavior' }
     ];
     const tests: string[] = adapter ? [adapter.test] : testCommandsFor(profile);
@@ -213,6 +431,62 @@ export class Planner {
       tests,
       risk: 'medium'
     };
+  }
+
+  /**
+   * Finds files in the project understanding that might be relevant to the given task
+   */
+  private findRelevantFiles(task: string, understanding: ProjectUnderstanding): string[] {
+    const relevantFiles: string[] = [];
+    const taskLower = task.toLowerCase();
+
+    // Common task keywords and their associated file patterns
+    const taskPatterns: Record<string, string[]> = {
+      'auth': ['auth', 'login', 'logout', 'password', 'token', 'session'],
+      'user': ['user', 'profile', 'account'],
+      'api': ['api', 'service', 'endpoint', 'route'],
+      'database': ['db', 'database', 'model', 'entity', 'repository'],
+      'ui': ['component', 'page', 'view', 'ui'],
+      'util': ['util', 'helper', 'utils', 'helpers'],
+      'test': ['test', 'spec'],
+      'config': ['config', 'settings', 'configure']
+    };
+
+    // Check if task matches any known patterns
+    let matchedPatterns: string[] = [];
+    for (const [pattern, keywords] of Object.entries(taskPatterns)) {
+      if (taskLower.includes(pattern) || keywords.some(keyword => taskLower.includes(keyword))) {
+        matchedPatterns = keywords;
+        break;
+      }
+    }
+
+    // If no specific pattern matched, use words from the task itself
+    if (matchedPatterns.length === 0) {
+      const taskWords = taskLower.split(/\s+/).filter(w => w.length > 2);
+      matchedPatterns = taskWords;
+    }
+
+    // Search for files that match these patterns
+    const allFiles = [...understanding.importantFiles];
+    for (const [dir, files] of Object.entries(understanding.architecture.structure)) {
+      allFiles.push(...files.map(f => path.join(dir, f)));
+    }
+
+    for (const file of allFiles) {
+      const fileLower = file.toLowerCase();
+      const fileName = path.basename(fileLower);
+
+      // Check if file matches any of our patterns
+      if (matchedPatterns.some(pattern =>
+          fileName.includes(pattern) ||
+          fileLower.includes(pattern))) {
+        relevantFiles.push(file);
+      }
+    }
+
+    // Limit to most relevant files
+    return relevantFiles.slice(0, 5);
   }
 
   private projectContext(ws: Workspace, profile: ProjectProfile, task: string, adapters?: Record<string, AdapterOverrideConfig>): string {

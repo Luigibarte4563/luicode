@@ -219,3 +219,20 @@ npm test           → 11 passed suites, 157 passed tests
   MODEL_SETUP.md, updated precedence), FEATURE.md (config bullet + test count),
   this file.
 - Tests added for the lock-file write path (`tests/modelIntegration.test.ts`).
+
+## Recent Improvements
+
+Enhanced the GeneratorAgent to support structured multi-file output for large code generation:
+- Added `FileOperation` and `MultiFileOutput` interfaces in `src/types.ts`
+- Modified `src/agent/GeneratorAgent.ts` to output structured JSON representing multiple file operations
+- Accumulate file operations across reasoning steps
+- Added per-file verification and correction passes
+- Improved handling of ARGS parsing and payload extraction
+
+Added web server UI for configuration and monitoring:
+- Created `src/server/server.ts` with Express-based LuicodeServer class
+- Implemented REST API endpoints for status, project info, config, providers, models, sessions, files, and git status
+- Added static file serving for SPA UI with tabs for Providers, Models, Messaging, Integrations, and Session
+- Created `public/` directory with HTML/CSS/JS for the interactive web interface
+- Added `luicode server` command to both CLI and interactive UI
+- Fixed TypeScript errors in Project Understanding Mode implementation

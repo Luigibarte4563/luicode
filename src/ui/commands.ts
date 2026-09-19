@@ -4,7 +4,7 @@ import { RunControl } from '../agent/runControl';
 import { GitManager } from '../git/GitManager';
 import { SessionManager } from '../sessions/SessionManager';
 import { Workspace } from '../workspace/Workspace';
-import { inspectProject } from '../workspace/inspector';
+import { inspectProject, ProjectProfile } from '../workspace/inspector';
 import { ModelRouter } from '../router/ModelRouter';
 import { WorkingMemory, MemorySection } from '../memory/WorkingMemory';
 import {
@@ -14,7 +14,6 @@ import {
   routingSummary,
   saveConfigChanges,
   setTaskModel,
-  testIntegration,
   isKnownProvider
 } from '../llm/integration';
 import { CommandRisk, LuicodeConfig, AutonomyLevel, Plan, TaskKind, AgentEvent } from '../types';
@@ -846,6 +845,20 @@ registerCommand({
   }
 });
 
+// Project Understanding
+registerCommand({
+  id: 'understand',
+  name: 'Project Understanding',
+  description: 'Analyze and map the project structure, dependencies, and architecture',
+  category: 'System',
+  aliases: ['project-map', 'project-understanding'],
+  slash: '/understand',
+  execute(ctx, args) {
+    const refresh = args.trim() === '--refresh';
+    understandProject(ctx, refresh);
+  }
+});
+
 registerCommand({
   id: 'read',
   name: '/read',
@@ -906,6 +919,64 @@ registerCommand({
     }
     const body = (await mem.readSection(section)) || '(empty)';
     ctx.tui.result(`MEMORY — ${section}`, body.split('\n'));
+  }
+});
+
+// Server
+registerCommand({
+  id: 'server',
+  name: 'LUICode Server',
+  description: 'Start the LUICode web server for configuration and monitoring',
+  category: 'System',
+  aliases: ['server-start'],
+  slash: '/server',
+  async execute(ctx) {
+    const { services } = ctx;
+    const { ws, config, sessions, git } = services;
+
+    const port = 3000; // Default port
+
+    try {
+      ctx.tui.toast(`Starting LUICode server on http://localhost:${port}...`);
+
+      // Import and start the server
+      const { LuicodeServer } = await import('../server/server');
+
+      const server = new LuicodeServer({
+        port,
+        workspace: ws,
+        config,
+        sessions,
+        gitManager: git
+      });
+
+      await server.start();
+
+      ctx.tui.toast(`LUICode server started at http://localhost:${port}`);
+      ctx.tui.toast('Press Ctrl+C to stop the server');
+
+      // Open browser if requested
+      // Note: In the interactive UI, we always open the browser
+      const { exec } = await import('child_process');
+      try {
+        exec(`start http://localhost:${port}`);
+      } catch (e) {
+        // Ignore errors in opening browser
+      }
+
+      // Keep the server running until interrupted
+      // In a real implementation, we'd handle shutdown signals properly
+      return new Promise((resolve) => {
+        process.once('SIGINT', () => {
+          server.stop().then(() => {
+            ctx.tui.toast('LUICode server stopped');
+            resolve();
+          });
+        });
+      });
+    } catch (error) {
+      ctx.tui.toast(`Failed to start server: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 });
 
@@ -1312,4 +1383,343 @@ export { path as pathUtils };
 // Re-export for consumers that want the current runtime plan.
 export function currentPlan(services: CommandServices): Plan | null {
   return services.agent()?.session.plan ?? null;
+}
+
+// Project Understanding Service
+async function understandProject(ctx: CommandContext, refresh: boolean = false): Promise<void> {
+  const { services, tui } = ctx;
+  const { ws } = services;
+
+  tui.result('PROJECT UNDERSTANDING', ['Analyzing project...']);
+
+  try {
+    // Check if project map exists and we're not forcing a refresh
+    const projectMapPath = '.luicode/project-map.md';
+    const projectMapExists = ws.absoluteExists(path.join(ws.root, projectMapPath));
+
+    if (projectMapExists && !refresh) {
+      const existingMap = ws.readFileSafe(projectMapPath);
+      if (existingMap) {
+        tui.result('PROJECT UNDERSTANDING (CACHED)', existingMap.split('\n'));
+        tui.toast('Project understanding loaded from cache. Use /understand --refresh to rebuild.');
+        return;
+      }
+    }
+
+    // Inspect the project
+    const profile = inspectProject(ws);
+    const allFiles = ws.walkFiles();
+
+    // Analyze project structure
+    const analysis = await analyzeProjectStructure(ws, profile, allFiles);
+
+    // Generate project map
+    const projectMap = generateProjectMap(profile, analysis, allFiles);
+
+    // Ensure .luicode directory exists by trying to write a file there
+    try {
+      // Try to write a temporary file to ensure we can write to the directory
+      ws.writeFile('.luicode/.tmp-understand', '');
+      ws.deleteFile('.luicode/.tmp-understand');
+    } catch {
+      // If we can't write, continue anyway - the writeFile call below will handle errors
+    }
+
+    // Save project map
+    ws.writeFile(projectMapPath, projectMap);
+
+    // Display results
+    tui.result('PROJECT UNDERSTANDING', projectMap.split('\n'));
+    tui.toast('Project understanding complete and saved to .luicode/project-map.md');
+
+  } catch (error) {
+    tui.toast(`Failed to analyze project: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// Helper function to analyze project structure
+// _profile parameter is intentionally unused but kept for potential future use
+async function analyzeProjectStructure(ws: Workspace, _profile: ProjectProfile, allFiles: string[]): Promise<{
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  importantFiles: string[];
+  directories: Record<string, string[]>;
+  patterns: string[];
+  issues: string[];
+}> {
+  // Read package.json for dependencies
+  let dependencies: Record<string, string> = {};
+  let devDependencies: Record<string, string> = {};
+
+  const pkgPath = allFiles.find(f => f.endsWith('package.json'));
+  if (pkgPath && ws.absoluteExists(path.join(ws.root, pkgPath))) {
+    try {
+      const pkgContent = ws.readFile(pkgPath);
+      const pkg = JSON.parse(pkgContent);
+      dependencies = pkg.dependencies ?? {};
+      devDependencies = pkg.devDependencies ?? {};
+    } catch {
+      // If we can't parse, continue with empty dependencies
+    }
+  }
+
+  // Identify important files
+  const importantFiles: string[] = [];
+  const importantFilePatterns = [
+    'README.md', 'package.json', 'tsconfig.json', 'jsconfig.json',
+    'main.tsx', 'main.ts', 'index.tsx', 'index.ts', 'App.tsx', 'App.ts',
+    'server.ts', 'server.js', 'app.ts', 'app.js', 'vite.config.ts',
+    'webpack.config.js', 'next.config.js', 'tailwind.config.js',
+    '.env.example', '.env', 'docker-compose.yml', 'Dockerfile'
+  ];
+
+  for (const file of allFiles) {
+    const fileName = path.basename(file);
+    if (importantFilePatterns.includes(fileName)) {
+      importantFiles.push(file);
+    }
+  }
+
+  // Group files by directory
+  const directories: Record<string, string[]> = {};
+  for (const file of allFiles) {
+    const dir = path.dirname(file);
+    if (dir === '.') continue; // Skip root files for directory grouping
+
+    if (!directories[dir]) {
+      directories[dir] = [];
+    }
+    directories[dir].push(file);
+  }
+
+  // Sort directories by file count
+  const sortedDirs = Object.entries(directories)
+    .sort(([, a], [, b]) => b.length - a.length)
+    .reduce((obj, [key, value]) => ({ ...obj, [key]: value }), {});
+
+  // Detect architectural patterns
+  const patterns: string[] = [];
+
+  // Check for common patterns
+  if (allFiles.some(f => f.includes('/components/') && (f.endsWith('.tsx') || f.endsWith('.jsx')))) {
+    patterns.push('Component-based architecture');
+  }
+
+  if (allFiles.some(f => f.includes('/services/') && (f.endsWith('.ts') || f.endsWith('.js')))) {
+    patterns.push('Service layer');
+  }
+
+  if (allFiles.some(f => f.includes('/hooks/') && (f.endsWith('.ts') || f.endsWith('.js')))) {
+    patterns.push('Custom hooks');
+  }
+
+  if (allFiles.some(f => f.includes('/utils/') || f.includes('/helpers/'))) {
+    patterns.push('Utility helpers');
+  }
+
+  if (allFiles.some(f => f.includes('/types/') || f.includes('/interfaces/'))) {
+    patterns.push('TypeScript interfaces/types');
+  }
+
+  if (allFiles.some(f => f.includes('/context/') && (f.endsWith('.tsx') || f.endsWith('.ts')))) {
+    patterns.push('React Context');
+  }
+
+  if (allFiles.some(f => f.includes('/routes/') || f.includes('/pages/'))) {
+    patterns.push('Routing-based structure');
+  }
+
+  if (allFiles.some(f => f.includes('/store/') && (f.endsWith('.ts') || f.endsWith('.js')))) {
+    patterns.push('State management');
+  }
+
+  // Detect potential issues
+  const issues: string[] = [];
+
+  // Check for duplicate files (same name in different directories)
+  const fileNames: Record<string, string[]> = {};
+  for (const file of allFiles) {
+    const name = path.basename(file);
+    if (!fileNames[name]) {
+      fileNames[name] = [];
+    }
+    fileNames[name].push(file);
+  }
+
+  for (const [name, files] of Object.entries(fileNames)) {
+    if (files.length > 1) {
+      issues.push(`Duplicate file name: ${name} (found in ${files.length} locations)`);
+    }
+  }
+
+  // Check for large files (simple heuristic)
+  for (const file of allFiles) {
+    try {
+      const content = ws.readFile(file);
+      if (content.length > 5000) { // Arbitrary threshold
+        issues.push(`Large file detected: ${file} (${content.length} characters)`);
+      }
+    } catch {
+      // Skip files we can't read
+    }
+  }
+
+  // Check for missing common files
+  const recommendedFiles = ['README.md', '.gitignore'];
+  for (const recFile of recommendedFiles) {
+    if (!allFiles.includes(recFile)) {
+      issues.push(`Missing recommended file: ${recFile}`);
+    }
+  }
+
+  return {
+    dependencies,
+    devDependencies,
+    importantFiles,
+    directories: sortedDirs,
+    patterns,
+    issues
+  };
+}
+
+type AnalysisResult = {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  importantFiles: string[];
+  directories: Record<string, string[]>;
+  patterns: string[];
+  issues: string[];
+};
+
+// Helper function to generate project map markdown
+function generateProjectMap(
+  profile: ProjectProfile,
+  analysis: AnalysisResult,
+  allFiles: string[]
+): string {
+  const { dependencies, devDependencies, importantFiles, directories, patterns, issues } = analysis;
+
+  const lines: string[] = [];
+
+  lines.push('# LUICode Project Understanding');
+  lines.push('');
+  lines.push(`**Project:** ${profile.name}`);
+  lines.push(`**Framework:** ${profile.framework}`);
+  lines.push(`**Language:** ${profile.language}`);
+  lines.push(`**Package Manager:** ${profile.packageManager}`);
+  lines.push('');
+
+  // Entry points
+  if (profile.entryFiles.length > 0) {
+    lines.push('## Entry Points');
+    for (const entry of profile.entryFiles) {
+      lines.push(`- ${entry}`);
+    }
+    lines.push('');
+  }
+
+  // Architecture
+  lines.push('## Architecture');
+  if (patterns.length > 0) {
+    for (const pattern of patterns) {
+      lines.push(`✓ ${pattern}`);
+    }
+  } else {
+    lines.push('No specific architectural patterns detected');
+  }
+  lines.push('');
+
+  // Important directories
+  lines.push('## Project Structure');
+  lines.push('```');
+
+  // Show directory structure
+  const sortedDirKeys = Object.keys(directories).sort();
+  for (const dir of sortedDirKeys) {
+    const dirName = dir === '.' ? '(root)' : dir;
+    const fileCount = directories[dir].length;
+    lines.push(`${dirName}/ (${fileCount} files)`);
+
+    // Show up to 3 files per directory
+    const filesToShow = directories[dir].slice(0, 3);
+    for (const file of filesToShow) {
+      const fileName = path.basename(file);
+      lines.push(`  ├─ ${fileName}`);
+    }
+
+    if (directories[dir].length > 3) {
+      lines.push(`  └─ ...and ${directories[dir].length - 3} more`);
+    }
+  }
+
+  // Show root files not in directories
+  const rootFiles = allFiles.filter(file => path.dirname(file) === '.' && !importantFiles.includes(file));
+  if (rootFiles.length > 0) {
+    lines.push('(root)/');
+    for (const file of rootFiles.slice(0, 3)) {
+      lines.push(`  ├─ ${file}`);
+    }
+    if (rootFiles.length > 3) {
+      lines.push(`  └─ ...and ${rootFiles.length - 3} more`);
+    }
+  }
+
+  lines.push('```');
+  lines.push('');
+
+  // Important files
+  if (importantFiles.length > 0) {
+    lines.push('## Important Files');
+    for (const file of importantFiles.slice(0, 10)) {
+      lines.push(`✓ ${file}`);
+    }
+    if (importantFiles.length > 10) {
+      lines.push(`...and ${importantFiles.length - 10} more`);
+    }
+    lines.push('');
+  }
+
+  // Dependencies
+  lines.push('## Dependencies');
+  const allDeps = { ...dependencies, ...devDependencies };
+  if (Object.keys(allDeps).length > 0) {
+    for (const [dep, version] of Object.entries(allDeps).slice(0, 10)) {
+      const isDev = devDependencies[dep] ? '(dev)' : '';
+      lines.push(`✓ ${dep} ${version} ${isDev}`);
+    }
+    if (Object.keys(allDeps).length > 10) {
+      lines.push(`...and ${Object.keys(allDeps).length - 10} more`);
+    }
+  } else {
+    lines.push('No dependencies found');
+  }
+  lines.push('');
+
+  // Potential issues
+  if (issues.length > 0) {
+    lines.push('## Potential Issues');
+    for (const issue of issues.slice(0, 5)) {
+      lines.push(`⚠ ${issue}`);
+    }
+    if (issues.length > 5) {
+      lines.push(`...and ${issues.length - 5} more`);
+    }
+    lines.push('');
+  } else {
+    lines.push('## Potential Issues');
+    lines.push('No significant issues detected');
+    lines.push('');
+  }
+
+  // Statistics
+  lines.push('## Statistics');
+  lines.push(`- Total files: ${allFiles.length}`);
+  lines.push(`- Dependencies: ${Object.keys(dependencies).length}`);
+  lines.push(`- Dev dependencies: ${Object.keys(devDependencies).length}`);
+
+  // Add timestamp
+  lines.push('');
+  lines.push(`*Generated on ${new Date().toLocaleString()}*`);
+
+  return lines.join('\n');
 }

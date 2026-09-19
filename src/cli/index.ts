@@ -85,6 +85,9 @@ USAGE
   luicode model set-default <n>    Set the default provider
   luicode model set <task> <spec>  Route a task to a provider/model (e.g. coder openai/gpt-4o-mini)
   luicode model test <spec>        Verify a provider/model connection (--api-key --timeout)
+  luicode server                   Start the LUICode web server for configuration and monitoring
+  luicode server --port <port>     Specify server port (default: 3000)
+  luicode server --no-open         Do not automatically open browser
   luicode --version                Show version
   luicode --help                   Show this help
 
@@ -461,6 +464,83 @@ async function runReview(cwd: string, config: LuicodeConfig, sessions: SessionMa
   process.stdout.write('\n' + report + '\n');
 }
 
+async function runServerCommand(cwd: string, config: LuicodeConfig, sessions: SessionManager, argv: string[]): Promise<void> {
+  // Parse server-specific arguments
+  let port = 3000;
+  let open = true;
+
+  const positional: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--port' || arg.startsWith('--port=')) {
+      port = parseInt(arg.startsWith('--port=') ? arg.slice('--port='.length) : argv[++i], 10);
+    } else if (arg === '--no-open') {
+      open = false;
+    } else if (!arg.startsWith('-')) {
+      positional.push(arg);
+    }
+  }
+
+  if (isNaN(port) || port <= 0 || port > 65535) {
+    process.stdout.write('Error: Invalid port number. Please specify a valid port between 1 and 65535.\n');
+    return;
+  }
+
+  process.stdout.write(`Starting LUICode server on port ${port}...\n`);
+
+  try {
+    // Import and start the server
+    // Note: We're using dynamic import to avoid circular dependencies
+    const { LuicodeServer } = await import('../server/server');
+
+    const ws = new Workspace(cwd);
+    const git = new GitManager(cwd);
+
+    const server = new LuicodeServer({
+      port,
+      workspace: ws,
+      config,
+      sessions,
+      gitManager: git
+    });
+
+    await server.start();
+
+    process.stdout.write(`LUICode server started at http://localhost:${port}\n`);
+    process.stdout.write('Press Ctrl+C to stop the server\n');
+
+    // Open browser if requested
+    if (open) {
+      const { exec } = await import('child_process');
+      try {
+        exec(`start http://localhost:${port}`);
+      } catch (e) {
+        // Ignore errors in opening browser
+      }
+    }
+
+    // Keep the server running until interrupted
+    return new Promise((resolve) => {
+      process.once('SIGINT', () => {
+        server.stop().then(() => {
+          process.stdout.write('\nLUICode server stopped\n');
+          resolve();
+        });
+      });
+
+      process.once('SIGTERM', () => {
+        server.stop().then(() => {
+          process.stdout.write('\nLUICode server stopped\n');
+          resolve();
+        });
+      });
+    });
+  } catch (error) {
+    process.stdout.write(`Failed to start server: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+}
+
 async function runTaskOnce(cwd: string, config: LuicodeConfig, sessions: SessionManager, mode: AutonomyLevel, task: string, resume = false): Promise<void> {
   const routerFor = (t: 'planner' | 'coder' | 'reviewer'): ModelRouter | null => new ModelRouter(config);
   const session = makeSession(sessions, task, mode, resume);
@@ -657,6 +737,11 @@ async function main(): Promise<void> {
 
   if (argv[0] === 'model') {
     await runModelCommand(cwd, config, argv.slice(1));
+    return;
+  }
+
+  if (argv[0] === 'server') {
+    await runServerCommand(cwd, config, sessions, argv.slice(1));
     return;
   }
 
