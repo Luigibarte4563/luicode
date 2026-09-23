@@ -55,7 +55,7 @@ def test_admin_page_spacing_matches_visible_action_bar(page, admin_base_url, wid
                 measurements["top"], abs=1
             )
 
-    for title in ("Providers", "Model Config", "Messaging"):
+    for title in ("Providers", "Model config", "Messaging"):
         page.get_by_role("button", name=title, exact=True).click()
         expect(page.locator("#pageTitle")).to_have_text(title)
         assert_spacing()
@@ -80,7 +80,7 @@ def test_admin_page_spacing_matches_visible_action_bar(page, admin_base_url, wid
 def test_settings_text_fields_opt_out_of_autofill(page, admin_base_url):
     page.goto(f"{admin_base_url}/admin")
     expect(page.locator("#messageArea")).to_have_text("")
-    for title in ("Providers", "Model Config", "Messaging", "Integrations"):
+    for title in ("Providers", "Model config", "Messaging", "Integrations"):
         page.get_by_role("button", name=title, exact=True).click()
         assert_autofill_opt_out(page)
     page.get_by_role("button", name="Providers", exact=True).click()
@@ -103,7 +103,7 @@ def test_selected_admin_tab_survives_refresh_and_browser_navigation(
 ):
     page.goto(f"{admin_base_url}/admin")
     for title, path in (
-        ("Model Config", "/admin/model_config"),
+        ("Model config", "/admin/model_config"),
         ("Messaging", "/admin/messaging"),
         ("Integrations", "/admin/integrations"),
         ("Providers", "/admin"),
@@ -193,13 +193,11 @@ def test_admin_loads_current_release_assets_before_rendering_dynamic_content(
     page.goto(f"{admin_base_url}/admin")
 
     expect(page.locator('[data-provider="nvidia_nim"]')).to_be_visible()
-    expect(page.locator(".brand p")).to_have_text(
-        f"Server Control · v{package_version()}"
-    )
+    expect(page.locator(".brand p")).to_have_text(f"server · v{package_version()}")
     logo_link = page.get_by_role("link", name="Open luicode on GitHub")
     expect(logo_link).to_be_visible()
     expect(logo_link).to_have_attribute(
-        "href", "https://github.com/your-github-org/luicode"
+        "href", "https://github.com/Luigibarte4563/luicode"
     )
     expect(logo_link).to_have_attribute("target", "_blank")
 

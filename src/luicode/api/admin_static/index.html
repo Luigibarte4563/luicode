@@ -6,7 +6,7 @@
     <title>luicode Admin</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='14' fill='%2316223c'/%3E%3Cpath d='M18 22l13 10-13 10' fill='none' stroke='%233de8ab' stroke-linecap='round' stroke-linejoin='round' stroke-width='7'/%3E%3Crect x='40' y='27' width='13' height='10' rx='5' fill='%2394a8ff'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='12' fill='%23f0a51c'/%3E%3Ctext x='32' y='45' font-family='Verdana,sans-serif' font-size='36' font-weight='800' text-anchor='middle' fill='%23201404'%3E1c%3C/text%3E%3C/svg%3E"
     />
     <link rel="stylesheet" href="/admin/assets/__LUICODE_VERSION__/admin.css" />
     <link rel="stylesheet" href="/admin/assets/__LUICODE_VERSION__/code_sessions.css" />
@@ -18,17 +18,16 @@
         <div class="brand">
           <a
             class="brand-mark"
-            href="https://github.com/your-github-org/luicode"
+            href="https://github.com/Luigibarte4563/luicode"
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Open luicode on GitHub"
           >
+            <span class="brand-monogram" aria-hidden="true">1c</span>
             <img src="/admin/assets/__LUICODE_VERSION__/app-icon.svg" alt="" />
           </a>
-          <div>
-            <h1>luicode</h1>
-            <p>Server Control · v__LUICODE_VERSION__</p>
-          </div>
+          <h1>luicode</h1>
+          <p>server · v__LUICODE_VERSION__</p>
         </div>
         <nav id="sectionNav" class="section-nav" aria-label="Admin views"></nav>
       </aside>
@@ -39,6 +38,7 @@
             <h2 id="pageTitle">Providers</h2>
             <span id="startupMessage" class="startup-message" role="status" hidden></span>
           </div>
+          <p id="pageSubtext" class="page-subtext">Connect model providers so luicode can discover and route to their models.</p>
         </header>
 
         <div id="adminViews" class="admin-views">

@@ -17,7 +17,7 @@ from luicode.config.server_urls import same_proxy_url
 from luicode.core.json_types import JsonObject
 from luicode.harnesses.config_file import atomic_write_text
 
-_IDENTITY = "https://github.com/your-github-org/luicode/integrations/claude-desktop"
+_IDENTITY = "https://github.com/Luigibarte4563/luicode/integrations/claude-desktop"
 LUICODE_ID = str(uuid5(NAMESPACE_URL, _IDENTITY))
 DEFAULT_ID = str(uuid5(NAMESPACE_URL, _IDENTITY + "/default"))
 _VIEW_HEADER = "X-LUICODE-Model-View"

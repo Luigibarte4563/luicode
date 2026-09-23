@@ -184,8 +184,8 @@ def test_admin_page_uses_installed_version(monkeypatch, tmp_path):
     response = _local_client(create_test_app()).get("/admin")
 
     assert response.status_code == 200
-    assert "<p>Server Control · v9.8.7</p>" in response.text
-    assert 'href="https://github.com/your-github-org/luicode"' in response.text
+    assert "<p>server · v9.8.7</p>" in response.text
+    assert 'href="https://github.com/Luigibarte4563/luicode"' in response.text
     assert 'target="_blank"' in response.text
     assert 'rel="noopener noreferrer"' in response.text
     assert 'aria-label="Open luicode on GitHub"' in response.text

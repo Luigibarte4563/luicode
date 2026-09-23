@@ -2,7 +2,7 @@
 set -eu
 
 # Set to your luicode repository (owner/repo).
-REPO_ARCHIVE_URL="https://github.com/your-github-org/luicode/archive/refs/heads/main.zip"
+REPO_ARCHIVE_URL="https://github.com/Luigibarte4563/luicode/archive/refs/heads/main.zip"
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.12.13"
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"

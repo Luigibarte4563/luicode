@@ -14,7 +14,7 @@ Thanks for helping improve luicode. Keep changes focused, test the behavior you 
 Install [uv](https://docs.astral.sh/uv/) and Python 3.14, then run directly from the checkout:
 
 ```bash
-git clone https://github.com/your-github-org/luicode.git
+git clone https://github.com/Luigibarte4563/luicode.git
 cd luicode
 uv python install 3.14.0
 uv run luicode-server

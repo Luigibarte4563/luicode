@@ -28,13 +28,15 @@ const VIEW_GROUPS = [
     id: "providers",
     label: "Providers",
     title: "Providers",
+    subtitle: "Connect model providers so luicode can discover and route to their models.",
     sections: ["runtime"],
     containerId: "providersSections",
   },
   {
     id: "model_config",
-    label: "Model Config",
-    title: "Model Config",
+    label: "Model config",
+    title: "Model config",
+    subtitle: "Choose which models luicode routes to and how the gateway thinks and browses.",
     sections: ["models", "reasoning", "web_tools"],
     containerId: "modelConfigSections",
   },
@@ -42,6 +44,7 @@ const VIEW_GROUPS = [
     id: "messaging",
     label: "Messaging",
     title: "Messaging",
+    subtitle: "Send and receive messages with luicode through your messaging apps.",
     sections: ["messaging", "voice"],
     containerId: "messagingSections",
   },
@@ -49,6 +52,7 @@ const VIEW_GROUPS = [
     id: "integrations",
     label: "Integrations",
     title: "Integrations",
+    subtitle: "Connect luicode to your editors and coding agents.",
     sections: [],
     containerId: "view-integrations",
   },
@@ -56,6 +60,7 @@ const VIEW_GROUPS = [
     id: "code",
     label: "Code sessions",
     title: "Code sessions",
+    subtitle: "",
     sections: [],
     containerId: "codeRoot",
   },
@@ -254,6 +259,9 @@ function setActiveView(viewId, { scroll = false } = {}) {
     VIEW_GROUPS.find((view) => view.id === viewId) || VIEW_GROUPS[0];
   state.activeView = activeView.id;
   byId("pageTitle").textContent = activeView.title;
+  const subtext = byId("pageSubtext");
+  subtext.textContent = activeView.subtitle || "";
+  subtext.hidden = !activeView.subtitle;
   renderStartup();
   if (activeView.id === "code") state.codeCatalogRetry = true;
   void refreshStartup();
@@ -304,16 +312,23 @@ function renderProviders(providerStatus) {
   const container = byId("providerGroups");
   container.replaceChildren();
   [
-    ["oauth", "OAuth providers"],
-    ["cloud", "Cloud providers"],
-    ["local", "Local providers"],
-  ].forEach(([kind, label]) => {
+    ["oauth", "OAuth providers", "connected"],
+    ["cloud", "Cloud providers", "configured"],
+    ["local", "Local providers", "configured"],
+  ].forEach(([kind, label, countWord]) => {
     const group = document.createElement("section");
     group.className = "provider-strip";
     group.dataset.providerGroup = kind;
+    const header = document.createElement("div");
+    header.className = "strip-heading";
     const heading = document.createElement("h3");
     heading.textContent = label;
-    group.appendChild(heading);
+    const badge = document.createElement("span");
+    badge.className = "count-badge";
+    badge.dataset.providerGroupCount = kind;
+    badge.textContent = `0 ${countWord}`;
+    header.append(heading, badge);
+    group.appendChild(header);
     const subgroups = [
       ["configured", kind === "oauth" ? "Connected" : "Configured"],
       ["unconfigured", kind === "oauth" ? "Not connected" : "Not configured"],
@@ -335,6 +350,19 @@ function renderProviders(providerStatus) {
     container.appendChild(group);
   });
   providerStatus.forEach(updateProviderCard);
+  updateGroupCounts();
+}
+
+function updateGroupCounts() {
+  document.querySelectorAll("[data-provider-group]").forEach((group) => {
+    const badge = group.querySelector(".count-badge");
+    if (!badge) return;
+    const kind = group.dataset.providerGroup;
+    const configured = group.querySelector('[data-provider-subgroup="configured"]');
+    const count = configured ? configured.querySelectorAll(".provider-card").length : 0;
+    const word = kind === "oauth" ? "connected" : "configured";
+    badge.textContent = `${count} ${word}`;
+  });
 }
 
 function updateProviderCard(provider) {
@@ -352,6 +380,8 @@ function updateProviderCard(provider) {
   }
   const focused = card.contains(document.activeElement);
   const focusedLabel = focused ? document.activeElement.textContent : null;
+  const cell = document.createElement("div");
+  cell.className = "provider-cell";
   const title = document.createElement("span");
   title.className = "provider-title";
   const name = document.createElement("strong");
@@ -368,6 +398,9 @@ function updateProviderCard(provider) {
   logo.height = 20;
   website.append(name, logo);
   title.appendChild(website);
+  const desc = document.createElement("p");
+  desc.className = "provider-desc";
+  desc.textContent = providerHint(provider);
   const meta = document.createElement("span");
   meta.className = "provider-meta";
   meta.hidden = !oauth;
@@ -375,18 +408,29 @@ function updateProviderCard(provider) {
   result.className = "provider-check-result";
   result.dataset.providerCheckResult = provider.provider_id;
   result.hidden = true;
+  cell.append(title, desc, meta, result);
+  const pill = document.createElement("span");
+  pill.className = "provider-pill";
+  pill.dataset.providerPill = provider.provider_id;
+  applyProviderPill(pill, provider);
   const actions = document.createElement("div");
   actions.className = "provider-actions";
   if (oauth) populateConnectedAccountActions(provider, status, actions);
   if (provider.settings_keys?.length) {
-    const edit = oauth || configured;
-    const settings = authButton(edit ? "Edit" : "Configure", () => openProviderDialog(provider.provider_id), edit ? "secondary-button" : "primary-button");
+    const settings = authButton(
+      oauth ? "Edit" : configured ? "Manage" : "Configure",
+      () => openProviderDialog(provider.provider_id),
+      "secondary-button",
+    );
     settings.dataset.providerSettings = "true";
     settings.setAttribute("aria-haspopup", "dialog");
     settings.setAttribute("aria-controls", "providerDialog");
     actions.appendChild(settings);
   }
-  card.replaceChildren(title, meta, result, actions);
+  const side = document.createElement("div");
+  side.className = "provider-side";
+  side.append(pill, actions);
+  card.replaceChildren(cell, side);
   const next = [...grid.children].find((other) => other !== card &&
     connectedAccountName(provider).localeCompare(providerDisplayName(other.dataset.provider), "en", { sensitivity: "base" }) < 0);
   if (card.parentElement !== grid || card.nextElementSibling !== (next || null)) grid.insertBefore(card, next || null);
@@ -398,6 +442,57 @@ function updateProviderCard(provider) {
     (controls.find((control) => control.textContent === focusedLabel) || actions.querySelector("button:not(:disabled)"))?.focus({ preventScroll: true });
   }
   renderProviderCheckResult(provider.provider_id);
+  updateGroupCounts();
+}
+
+function applyProviderPill(pill, provider) {
+  const oauth = provider.kind === "connected_account";
+  let text = "not connected";
+  let tone = "muted";
+  if (oauth) {
+    const status = state.authStatuses.get(provider.provider_id);
+    if (status == null || status.connected == null) {
+      text = "Checking…";
+      tone = "checking";
+    } else {
+      text = status.connected ? "connected" : "not connected";
+      tone = status.connected ? "ok" : "muted";
+    }
+  } else {
+    text = provider.status === "configured" ? "connected" : "not configured";
+    tone = provider.status === "configured" ? "ok" : "muted";
+  }
+  pill.textContent = text;
+  pill.classList.toggle("ok", tone === "ok");
+  pill.classList.toggle("checking", tone === "checking");
+}
+
+const PROVIDER_HINTS = {
+  github_copilot: "Sign in with GitHub to access Copilot coding models.",
+  openai: "Use OpenAI and ChatGPT models through the luicode gateway.",
+  open_router: "One key for a wide catalog of public and open models.",
+  groq: "Fast inference on LPU hardware for popular open models.",
+  deepseek: "DeepSeek's reasoning and chat models through the gateway.",
+  cerebras: "Ultra-fast silicon running open-weight models.",
+  bedrock: "AWS-managed foundation models on demand.",
+  azure_openai: "OpenAI models hosted on Microsoft Azure.",
+  cloudflare: "Run models on Cloudflare's global edge network.",
+  nvidia_nim: "NVIDIA-hosted inference for optimized models.",
+  lmstudio: "Local model server running on this machine.",
+  ollama: "Local server for open models (default http://localhost:11434).",
+  llamacpp: "Local llama.cpp server for GGUF models.",
+  fable: "Fable's reasoning models through the gateway.",
+};
+
+function providerHint(provider) {
+  return (
+    PROVIDER_HINTS[provider.provider_id] ||
+    (provider.kind === "connected_account"
+      ? "Sign in to discover and route models."
+      : provider.kind === "local"
+        ? "Serve models from a local endpoint."
+        : "Connect an API key to start routing models.")
+  );
 }
 
 function openProviderDialog(providerId) {
