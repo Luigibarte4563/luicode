@@ -17,12 +17,12 @@ def test_retired_provider_is_absent_and_default_setup_remains_available(
     expect(page.locator("#field-GITHUB_MODELS_TOKEN")).to_have_count(0)
     card = page.locator('[data-provider="nvidia_nim"]')
     expect(card.get_by_role("button", name="Configure", exact=True)).to_have_class(
-        "primary-button"
+        "secondary-button"
     )
     card.locator("[data-provider-settings]").click()
     expect(page.locator("#field-NVIDIA_NIM_API_KEY")).to_be_focused()
     close_provider(page)
-    page.get_by_role("button", name="Model Config", exact=True).click()
+    page.get_by_role("button", name="Model config", exact=True).click()
     expect(page.locator("#field-MODEL")).to_have_value(
         "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"
     )
@@ -57,7 +57,7 @@ def test_missing_provider_configuration_opens_modal_and_focuses_exact_field(
     key_input = page.locator("#field-NVIDIA_NIM_API_KEY")
 
     expect(card.get_by_role("button", name="Configure", exact=True)).to_have_class(
-        "primary-button"
+        "secondary-button"
     )
     expect(card.locator("[data-provider-settings]")).to_have_attribute(
         "aria-haspopup", "dialog"
@@ -107,7 +107,7 @@ def test_configured_provider_check_keeps_readiness_and_adds_models(
     card = page.locator('[data-provider="open_router"]')
 
     expect(card.locator(".provider-check-result")).to_have_text("3 models available")
-    expect(card.get_by_role("button", name="Edit", exact=True)).to_have_class(
+    expect(card.get_by_role("button", name="Manage", exact=True)).to_have_class(
         "secondary-button"
     )
     expect(card.locator("[data-provider-settings]")).to_have_attribute(
@@ -119,12 +119,12 @@ def test_configured_provider_check_keeps_readiness_and_adds_models(
     ).click()
 
     expect(card.locator(".provider-check-result")).to_have_text("3 models available")
-    expect(card.get_by_role("button", name="Edit", exact=True)).to_have_class(
+    expect(card.get_by_role("button", name="Manage", exact=True)).to_have_class(
         "secondary-button"
     )
 
     close_provider(page)
-    page.get_by_role("button", name="Model Config", exact=True).click()
+    page.get_by_role("button", name="Model config", exact=True).click()
     fable = page.get_by_role(
         "combobox",
         name="Fable Override default",
@@ -254,7 +254,7 @@ def test_provider_check_failure_is_separate_and_never_exposes_exception_text(
         "Unavailable: Could not refresh this provider's models. "
         "Verify its configuration and access."
     )
-    expect(card.get_by_role("button", name="Edit", exact=True)).to_have_class(
+    expect(card.get_by_role("button", name="Manage", exact=True)).to_have_class(
         "secondary-button"
     )
     page_text = page.locator("body").inner_text()
@@ -273,7 +273,7 @@ def test_multi_field_provider_targets_first_missing_configuration(
     account_input = page.locator("#field-CLOUDFLARE_ACCOUNT_ID")
 
     expect(card.get_by_role("button", name="Configure", exact=True)).to_have_class(
-        "primary-button"
+        "secondary-button"
     )
     expect(account_input).to_have_count(0)
 
@@ -312,7 +312,7 @@ def test_admin_loading_finishes_before_local_availability_checks(
     expect(page.locator('[data-provider-check-result="ollama"]')).to_be_hidden()
     expect(
         page.locator('[data-provider="lmstudio"]').get_by_role(
-            "button", name="Edit", exact=True
+            "button", name="Manage", exact=True
         )
     ).to_have_class("secondary-button")
     expect(key).to_have_value("unsaved-key")
@@ -345,7 +345,7 @@ def test_local_availability_failure_does_not_fail_admin_loading(
         expect(card.locator(".provider-check-result")).to_have_text(
             "Availability check failed. Use Test to retry."
         )
-        expect(card.get_by_role("button", name="Edit", exact=True)).to_have_class(
+        expect(card.get_by_role("button", name="Manage", exact=True)).to_have_class(
             "secondary-button"
         )
         dialog = open_provider(page, provider_id)

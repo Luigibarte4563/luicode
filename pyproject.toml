@@ -8,12 +8,6 @@ version = "1.0.0"
 description = "The local gateway for agentic coding: one proxy and Admin UI across providers and coding agents"
 readme = "README.md"
 requires-python = ">=3.14.0"
-# Repository URLs are placeholders; replace with the real luicode repository
-# before publishing. Do not use the existing "luicode" GitHub user namespace.
-# [project.urls]
-# Homepage = "https://github.com/your-github-org/luicode"
-# Repository = "https://github.com/your-github-org/luicode"
-# Issues = "https://github.com/your-github-org/luicode/issues"
 dependencies = [
     "anyio>=4.15.1",
     "fastapi[standard]>=0.141.1",
@@ -39,6 +33,11 @@ dependencies = [
     "github-copilot-sdk==1.0.13",
     "simplejson>=4.1.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Luigibarte4563/luicode"
+Repository = "https://github.com/Luigibarte4563/luicode"
+Issues = "https://github.com/Luigibarte4563/luicode/issues"
 
 [project.scripts]
 luicode-server = "luicode.cli.entrypoints:serve"

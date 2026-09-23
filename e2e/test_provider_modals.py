@@ -50,26 +50,31 @@ def test_provider_website_opens_in_new_tab_and_preserves_pending_settings(
     expect(page.locator("#dirtyState")).to_have_text("1 unsaved change")
 
 
-def test_provider_card_buttons_align_at_the_bottom_of_each_desktop_row(
+def test_provider_row_actions_align_to_the_right_of_each_row(
     page: Page, admin_base_url: str
 ) -> None:
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.goto(f"{admin_base_url}/admin")
     expect(page.locator("#messageArea")).to_have_text("")
-    positions = page.locator(
-        '[data-provider-group="cloud"] .provider-card'
-    ).evaluate_all(
-        """cards => cards.map(card => ({
-            row: Math.round(card.getBoundingClientRect().top),
-            bottom: card.querySelector('[data-provider-settings]').getBoundingClientRect().bottom,
-        }))"""
+    edges = page.locator('[data-provider-group="cloud"] .provider-card').evaluate_all(
+        """cards => cards.map(card => {
+            const button = card.querySelector('[data-provider-settings]');
+            const cardBox = card.getBoundingClientRect();
+            const buttonBox = button.getBoundingClientRect();
+            return {
+                right: cardBox.right - buttonBox.right,
+                bottom: cardBox.bottom - buttonBox.bottom,
+            };
+        })"""
     )
-    rows: dict[int, list[float]] = {}
-    for position in positions:
-        rows.setdefault(position["row"], []).append(position["bottom"])
-    assert any(len(bottoms) > 1 for bottoms in rows.values())
-    for bottoms in rows.values():
-        assert max(bottoms) - min(bottoms) < 1
+    assert edges
+    assert (
+        max(edge["right"] for edge in edges) - min(edge["right"] for edge in edges) < 1
+    )
+    assert (
+        max(edge["bottom"] for edge in edges) - min(edge["bottom"] for edge in edges)
+        < 1
+    )
 
 
 def test_provider_groups_sort_each_subgroup_and_keep_setup_separate_from_health(
@@ -105,7 +110,17 @@ def test_provider_groups_sort_each_subgroup_and_keep_setup_separate_from_health(
             '[data-provider-group="local"] [data-provider-subgroup="configured"] [data-provider="lmstudio"]'
         )
     ).to_be_visible()
-    expect(page.locator("#providerGroups .status-pill")).to_have_count(0)
+    # Every provider row carries a status pill that reflects its configuration state.
+    expect(page.locator("[data-provider-pill]")).not_to_have_count(0)
+    expect(
+        page.locator('[data-provider="open_router"] [data-provider-pill]')
+    ).to_have_text("connected")
+    expect(
+        page.locator('[data-provider="cloudflare"] [data-provider-pill]')
+    ).to_have_text("not configured")
+    expect(
+        page.locator('[data-provider="lmstudio"] [data-provider-pill]')
+    ).to_have_text("connected")
     expect(page.locator("#section-providers")).to_have_count(0)
     expect(page.locator("#field-NVIDIA_NIM_API_KEY")).to_have_count(0)
 
@@ -176,5 +191,5 @@ def test_modal_save_applies_only_its_changes_and_preserves_other_page_edits(
     expect(page.locator("#messageArea")).to_have_text("Applied")
     assert submissions == [{"values": {"NVIDIA_NIM_API_KEY": "new-key"}}]
     expect(page.locator("#dirtyState")).to_have_text("1 unsaved change")
-    page.get_by_role("button", name="Model Config", exact=True).click()
+    page.get_by_role("button", name="Model config", exact=True).click()
     expect(model).to_have_value("open_router/pending-model")

@@ -51,7 +51,7 @@ def test_key_rejection_retains_edits_and_restores_focus(
     page.route("**/admin/api/config/apply", lambda route: pending.append(route))
     page.goto(f"{admin_base_url}/admin")
     expect(page.locator("#messageArea")).to_have_text("")
-    page.get_by_role("button", name="Model Config", exact=True).click()
+    page.get_by_role("button", name="Model config", exact=True).click()
     other = page.locator("#field-MODEL_SONNET")
     other.fill("open_router/other-edit")
     page.get_by_role("button", name="Providers", exact=True).click()

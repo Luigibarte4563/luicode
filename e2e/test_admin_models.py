@@ -10,7 +10,7 @@ def _open_models(page: Page, admin_base_url: str) -> None:
     page.emulate_media(reduced_motion="reduce")
     page.goto(f"{admin_base_url}/admin")
     expect(page.locator("#messageArea")).to_have_text("")
-    page.get_by_role("button", name="Model Config", exact=True).click()
+    page.get_by_role("button", name="Model config", exact=True).click()
 
 
 def _refresh_openrouter_models(page: Page) -> None:
@@ -20,7 +20,7 @@ def _refresh_openrouter_models(page: Page) -> None:
     dialog.get_by_role("button", name="Refresh models", exact=True).click()
     expect(card.locator(".provider-check-result")).to_have_text("3 models available")
     close_provider(page)
-    page.get_by_role("button", name="Model Config", exact=True).click()
+    page.get_by_role("button", name="Model config", exact=True).click()
 
 
 def test_fallback_editor_adds_filters_reorders_and_removes_models(
@@ -170,7 +170,7 @@ def test_model_suggestions_keep_server_order_after_provider_check_and_late_respo
     with page.expect_request("**/admin/api/models"):
         dialog.get_by_role("button", name="Refresh models", exact=True).click()
     close_provider(page)
-    page.get_by_role("button", name="Model Config", exact=True).click()
+    page.get_by_role("button", name="Model config", exact=True).click()
     expect(field.locator("input")).to_have_value("open_router/custom-unsaved")
     field.locator("input").fill("")
     expect(field.get_by_role("option")).to_have_text(["None", *models])

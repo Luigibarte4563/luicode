@@ -14,7 +14,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALL_URL = (
-    "https://raw.githubusercontent.com/your-github-org/luicode/main/scripts/install"
+    "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install"
 )
 SCRIPTS = ("luicode-update", "luicode-update.cmd")
 

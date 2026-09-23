@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/your-github-org/luicode/security/advisories/new
+    url: https://github.com/Luigibarte4563/luicode/security/advisories/new
     about: Report credential leaks and security vulnerabilities privately.
