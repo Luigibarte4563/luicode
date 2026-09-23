@@ -1,0 +1,3 @@
+src/luicode/core/data/cl100k_base.tiktoken -text linguist-vendored=true
+scripts/update/luicode-update text eol=lf
+scripts/update/*.cmd text eol=crlf

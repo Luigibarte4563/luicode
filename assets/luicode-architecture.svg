@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-label="luicode architecture: coding agents connect through the luicode gateway to any model">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101a30"/>
+      <stop offset="1" stop-color="#0a111f"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16223c"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" rx="48" fill="url(#bg)"/>
+
+  <!-- left: agents -->
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <text x="120" y="110" fill="#94a8ff" font-size="34" font-weight="600" letter-spacing="1">CODING AGENTS</text>
+    <g>
+      <rect x="120" y="150" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="310" y="197" text-anchor="middle" fill="#e6edfa" font-size="30">claude code</text>
+    </g>
+    <g>
+      <rect x="120" y="246" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="310" y="293" text-anchor="middle" fill="#e6edfa" font-size="30">codex</text>
+    </g>
+    <g>
+      <rect x="120" y="342" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="310" y="389" text-anchor="middle" fill="#e6edfa" font-size="30">opencode · cline · pi</text>
+    </g>
+    <g>
+      <rect x="120" y="438" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="310" y="485" text-anchor="middle" fill="#e6edfa" font-size="30">hermes · dsh · grok</text>
+    </g>
+    <g>
+      <rect x="120" y="534" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="310" y="581" text-anchor="middle" fill="#e6edfa" font-size="30">muse · aider · + more</text>
+    </g>
+  </g>
+
+  <!-- right: models -->
+  <g font-family="Inter, ui-sans-serif, system-ui, sans-serif">
+    <text x="1100" y="110" fill="#94a8ff" font-size="34" font-weight="600" letter-spacing="1">ANY MODEL</text>
+    <g>
+      <rect x="1100" y="150" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="1290" y="197" text-anchor="middle" fill="#e6edfa" font-size="30">anthropic · openai</text>
+    </g>
+    <g>
+      <rect x="1100" y="246" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="1290" y="293" text-anchor="middle" fill="#e6edfa" font-size="30">openrouter · groq</text>
+    </g>
+    <g>
+      <rect x="1100" y="342" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="1290" y="389" text-anchor="middle" fill="#e6edfa" font-size="30">github copilot · vertex</text>
+    </g>
+    <g>
+      <rect x="1100" y="438" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="1290" y="485" text-anchor="middle" fill="#e6edfa" font-size="30">ollama · llama.cpp</text>
+    </g>
+    <g>
+      <rect x="1100" y="534" width="380" height="76" rx="20" fill="#121d36" stroke="#24324f" stroke-width="2"/>
+      <text x="1290" y="581" text-anchor="middle" fill="#e6edfa" font-size="30">nvidia nim · + 48 more</text>
+    </g>
+  </g>
+
+  <!-- center: luicode gateway -->
+  <g>
+    <circle cx="800" cy="380" r="210" fill="none" stroke="#2c3d63" stroke-width="3" stroke-dasharray="10 14"/>
+    <rect x="652" y="252" width="296" height="256" rx="64" fill="url(#core)" stroke="#3de8ab" stroke-width="3"/>
+    <path d="M730 410 L800 376 L730 342" fill="none" stroke="#3de8ab" stroke-linecap="round" stroke-linejoin="round" stroke-width="34"/>
+    <rect x="818" y="360" width="66" height="44" rx="22" fill="#94a8ff"/>
+    <text x="800" y="570" text-anchor="middle" fill="#eef4ff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="64" font-weight="650" letter-spacing="-2">luicode</text>
+    <text x="800" y="612" text-anchor="middle" fill="#8fa3c7" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="26" letter-spacing="4">GATEWAY</text>
+  </g>
+
+  <!-- connectors left -->
+  <g stroke="#35517f" stroke-width="4" opacity="0.85">
+    <path d="M500 188 L652 320" fill="none"/>
+    <path d="M500 284 L680 330" fill="none"/>
+    <path d="M500 380 L652 380" fill="none"/>
+    <path d="M500 476 L680 430" fill="none"/>
+    <path d="M500 572 L652 440" fill="none"/>
+  </g>
+  <!-- connectors right -->
+  <g stroke="#35517f" stroke-width="4" opacity="0.85">
+    <path d="M948 320 L1100 188" fill="none"/>
+    <path d="M920 330 L1100 284" fill="none"/>
+    <path d="M948 380 L1100 380" fill="none"/>
+    <path d="M920 430 L1100 476" fill="none"/>
+    <path d="M948 440 L1100 572" fill="none"/>
+  </g>
+
+  <text x="800" y="830" text-anchor="middle" fill="#5f7398" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24">One local gateway. Every agent. The model you choose.</text>
+</svg>
