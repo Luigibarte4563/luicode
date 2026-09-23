@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="320" viewBox="0 0 1080 320" role="img" aria-label="luicode">
+  <defs>
+    <linearGradient id="chip" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16223c"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+  </defs>
+  <!-- logomark chip -->
+  <rect x="16" y="16" width="288" height="288" rx="72" fill="url(#chip)" stroke="#26334f" stroke-width="4"/>
+  <!-- prompt chevron (mint) -->
+  <path d="M96 118 L180 160 L96 202" fill="none" stroke="#3de8ab" stroke-linecap="round" stroke-linejoin="round" stroke-width="38"/>
+  <!-- prompt cursor (periwinkle) -->
+  <rect x="212" y="136" width="64" height="48" rx="24" fill="#94a8ff"/>
+  <!-- wordmark text -->
+  <text x="360" y="218" fill="#eef4ff" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="150" font-weight="650" letter-spacing="-4">luicode</text>
+</svg>

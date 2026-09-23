@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+installer=$(curl -fsSL "https://raw.githubusercontent.com/your-github-org/luicode/main/scripts/install.sh")
+exec sh -c "$installer" sh "$@"
