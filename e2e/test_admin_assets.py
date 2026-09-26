@@ -202,7 +202,7 @@ def test_admin_loads_current_release_assets_before_rendering_dynamic_content(
     expect(logo_link).to_have_attribute("target", "_blank")
 
     versioned_root = f"/admin/assets/{package_version()}"
-    assert f"{versioned_root}/app-icon.svg" in requested_paths
+    assert f"{versioned_root}/luicode-wordmark-dark.svg" in requested_paths
     assert f"{versioned_root}/admin.css" in requested_paths
     assert f"{versioned_root}/code_sessions.css" in requested_paths
     assert f"{versioned_root}/model_combobox.js" in requested_paths

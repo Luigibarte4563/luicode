@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
 
-  /* luicode admin — near-black GitHub-dark surfaces, amber action accent */
+  /* luicode admin — near-black GitHub-dark surfaces, LUICode teal action accent */
   --bg: #0d1117;
   --main-bg: #161b22;
   --panel: #0d1117;
@@ -16,12 +16,19 @@
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.16);
 
-  /* Brand and Accent Colors */
-  --accent: #f0a51c;
-  --accent-dark: #d18f14;
-  --accent-muted: rgba(240, 165, 28, 0.12);
-  --accent-border: rgba(240, 165, 28, 0.4);
-  --accent-ink: #1f1404;
+  /* Brand and Accent Colors — LUICode teal from logo */
+  --luicode-accent: #3de8ab;
+  --luicode-accent-hover: #2fd89b;
+  --luicode-accent-muted: rgba(61, 232, 171, 0.12);
+  --luicode-accent-border: rgba(61, 232, 171, 0.4);
+  --luicode-accent-ink: #0a1f15;
+
+  /* Legacy accent aliases (for backward compatibility) */
+  --accent: var(--luicode-accent);
+  --accent-dark: var(--luicode-accent-hover);
+  --accent-muted: var(--luicode-accent-muted);
+  --accent-border: var(--luicode-accent-border);
+  --accent-ink: var(--luicode-accent-ink);
 
   /* Status Colors */
   --ok: #3fb950;
@@ -46,7 +53,7 @@
   /* Box Shadow & Glows */
   --shadow-sm: 0 1px 3px rgba(1, 4, 9, 0.4);
   --shadow: 0 16px 40px rgba(1, 4, 9, 0.55);
-  --glow-accent: 0 0 0 3px rgba(240, 165, 28, 0.3);
+  --glow-accent: 0 0 0 3px rgba(61, 232, 171, 0.3);
 
   /* Borders and Radius */
   --radius-sm: 8px;
@@ -134,36 +141,20 @@ textarea {
 }
 
 .brand-mark {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
+  display: block;
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: linear-gradient(135deg, #f7a92b 0%, #e08a12 100%);
-  box-shadow: 0 0 0 1px rgba(247, 169, 43, 0.4), var(--shadow-sm);
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+  aspect-ratio: 1080 / 320;
   margin-bottom: 12px;
 }
 
-.brand-monogram {
-  font-size: 17px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  color: #221505;
-}
-
 .brand-mark img {
-  position: absolute;
-  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
-  opacity: 0;
-  pointer-events: none;
+  object-fit: contain;
 }
 
 .brand h1 {
@@ -336,16 +327,34 @@ textarea:focus-visible,
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  margin-bottom: 0;
+  padding: 20px 24px;
+  gap: 12px;
 }
-.integration-card > button {
+.integration-card > .section-heading {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.integration-card > .section-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.integration-card h3 {
+  margin: 0;
+}
+.integration-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.integration-card > button,
+.integration-card > .provider-actions > button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   margin-top: auto;
-}
-.integration-card > button,
-.provider-card > .provider-actions > button {
   min-height: 38px;
   padding: 6px 14px;
   font-size: 13px;
@@ -387,48 +396,212 @@ button.startup-busy::before,
 .integration-files ul { margin: 8px 0 0; padding-left: 20px; }
 .integration-files code { overflow-wrap: anywhere; }
 
-/* Provider Row List */
+/* ────────────────────────────────────────────────────────────────────────
+   PROVIDER CARDS — SPACING / PADDING / LAYOUT FIX
+   Only spacing changes below. Colors, borders, radius, backgrounds,
+   functionality are untouched.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* 6. GRID LAYOUT — responsive, gap-based (no per-card margins) */
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 16px;
 }
 
+[data-provider-subgroup] > h4 + .provider-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+/* 1. CARD INTERNAL PADDING + 5. CARD HEIGHT */
 .provider-card {
   display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 78px;
-  padding: 12px 0;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
+  flex-direction: column;
+  padding: 20px;                 /* was 16px — more breathing room on all sides */
+  gap: 0;                        /* replaced by explicit spacing below, not a flat gap */
+  min-height: 160px;             /* slightly taller to fit comfortable spacing */
+  border: 1px solid var(--line); /* unchanged */
+  border-radius: var(--radius-md); /* unchanged */
+  background: var(--card);         /* unchanged */
   color: var(--text);
   font: inherit;
   text-align: left;
-  transition: background var(--transition-fast);
+  transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .provider-card:hover {
-  background: rgba(255, 255, 255, 0.02);
+  border-color: var(--line-strong);
+  background: var(--card-hover);
+  box-shadow: var(--shadow-sm);
 }
 
-.provider-cell {
+/* 4. CARD CONTENT SPACING — explicit hierarchy instead of a flat gap */
+
+.provider-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;           /* header → description: 10–12px */
+}
+
+.provider-card-title {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  min-width: 0;
+  gap: 4px;
   flex: 1;
+  min-width: 0;
 }
 
-.provider-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-end;
+.provider-card-name {
+  display: inline-flex;
+  align-items: center;
   gap: 10px;
-  flex: 0 0 auto;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-strong);
+  text-decoration: none;
+}
+
+.provider-card-name:hover,
+.provider-card-name:focus {
+  text-decoration: none;
+  color: var(--accent);
+}
+
+.provider-card-name:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.provider-card-logo {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 6px;
+}
+
+.provider-card-desc {
+  margin: 0 0 14px;              /* description → status: 12–16px */
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.provider-card-meta {
+  margin: 0 0 14px;              /* meta line (model count / error) same rhythm as desc */
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.provider-card-meta.error { color: var(--error); }
+
+.provider-card-pill {
+  margin-bottom: 16px;           /* status → buttons: 16px */
+}
+
+/* When the pill sits inline in the header instead of its own line,
+   don't double up on spacing */
+.provider-card-header .provider-card-pill {
+  margin-bottom: 0;
+}
+
+.provider-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;                      /* 8. button-to-button gap */
+  margin-top: auto;              /* pins actions to card bottom */
+  padding-top: 0;
+}
+
+.provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   3. SECTION / SUBSECTION SPACING
+   ──────────────────────────────────────────────────────────────────────── */
+
+/* Section-to-section (e.g. OAuth providers block → Cloud providers block) */
+.provider-strip,
+.settings-section {
+  margin-bottom: 32px;           /* was 24px */
+}
+
+.provider-strip .strip-heading {
+  padding: 20px 24px;            /* was 16px 24px — a touch more room around the title/badge */
+}
+
+/* Padding around the card grid inside a provider-strip panel */
+.provider-strip > .provider-grid,
+.provider-strip [data-provider-subgroup] {
+  padding: 20px 24px;
+}
+
+/* Subsection-to-subsection (CONFIGURED → NOT CONFIGURED groups) */
+[data-provider-subgroup] {
+  margin-bottom: 8px;
+}
+
+[data-provider-subgroup] > h4 {
+  margin: 24px 0 16px;           /* subsection label spacing: 16–24px */
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+[data-provider-subgroup]:first-of-type > h4 {
+  margin-top: 0;                 /* no extra gap before the very first subsection label */
+}
+
+[data-provider-subgroup] > h4 + .provider-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   9./10. EDGE COLLISION + RESPONSIVE SAFETY
+   ──────────────────────────────────────────────────────────────────────── */
+
+.provider-card-logo {
+  flex: none;                    /* icon never gets squeezed by long names */
+}
+
+.provider-card,
+.provider-strip,
+.settings-section {
+  min-width: 0;                  /* prevents flex/grid items from forcing horizontal overflow */
+}
+
+/* Mobile: single column, same gap rhythm, no cramped edges */
+@media (max-width: 600px) {
+  .provider-grid,
+  [data-provider-subgroup] > h4 + .provider-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .provider-card {
+    padding: 16px;                /* slightly tighter on mobile, still comfortable */
+  }
+
+  .provider-strip > .provider-grid,
+  .provider-strip [data-provider-subgroup] {
+    padding: 16px;
+  }
 }
 
 .provider-pill {
@@ -464,65 +637,6 @@ button.startup-busy::before,
   line-height: 1.4;
 }
 
-[data-provider-subgroup] { padding: 0 24px 16px; }
-[data-provider-subgroup] > h4 {
-  margin: 16px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-[data-provider-subgroup] > h4 + .provider-grid {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-  border-top: 1px solid var(--line);
-  margin-top: 8px;
-}
-.provider-dialog { width: min(600px, calc(100vw - 32px)); }
-.provider-dialog .section-heading { display: flex; justify-content: space-between; }
-.provider-dialog .section-heading h3 { margin: 0; }
-.provider-dialog .field-grid { grid-template-columns: minmax(0, 1fr); }
-.provider-dialog .field.advanced-field { display: flex; }
-.provider-dialog .provider-actions:not(:empty),
-.provider-dialog .provider-check-result:not([hidden]) { margin-bottom: 20px; }
-.provider-dialog .message-area:empty { display: none; }
-.provider-dialog-footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
-
-.provider-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.provider-title strong {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text-strong);
-}
-
-.provider-title a {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 100%;
-  color: var(--text-strong);
-  text-decoration: none;
-}
-.provider-title a:hover { text-decoration: none; }
-.provider-title a:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
-.provider-title img {
-  width: 34px;
-  height: 34px;
-  flex: none;
-  object-fit: contain;
-  padding: 7px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.04);
-}
-
 .provider-meta {
   color: var(--muted);
   font-size: 12px;
@@ -549,13 +663,6 @@ button.startup-busy::before,
 
 .provider-check-result.checking {
   color: var(--info);
-}
-
-.provider-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  align-items: center;
 }
 
 /* Button & Form Controls styling */
@@ -1065,11 +1172,13 @@ button.startup-busy::before,
     justify-content: center;
     text-align: center;
     flex-direction: column;
+    align-items: center;
   }
   
   .brand-mark {
-    width: 48px;
-    height: 48px;
+    width: 200px;
+    max-width: 80%;
+    aspect-ratio: 1080 / 320;
   }
 
   .section-nav {

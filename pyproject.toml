@@ -67,6 +67,10 @@ voice_local = [
     "accelerate>=1.15.0",
     "librosa>=1.0.0",
 ]
+browser = [
+    "browser-harness>=0.1.13",
+    "cdp-use>=1.4.5",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/luicode"]
@@ -157,6 +161,7 @@ python-version = "3.14"
 [tool.ty.analysis]
 # Optional voice_local extra: torch, transformers, librosa for local whisper transcription
 # Optional voice extra: nvidia-riva-client for nvidia_nim transcription provider
+# Optional browser extra: browser-harness, cdp-use for browser automation
 allowed-unresolved-imports = [
     "torch",
     "transformers",
@@ -164,4 +169,6 @@ allowed-unresolved-imports = [
     "riva.client",
     "pystray",
     "PIL",
+    "browser_harness",
+    "cdp_use",
 ]

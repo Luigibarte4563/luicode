@@ -36,6 +36,18 @@ from .configuration import ConfigurationService
 from .provider_manager import ProviderRuntimeManager
 from .web_tools.client import HTTPWebToolsClient
 
+try:
+    from luicode.application.browser_tools import (
+        BrowserAutomationConfig,
+        BrowserToolsService,
+    )
+
+    from .browser_tools.client import BrowserToolsClient
+except ImportError:
+    BrowserToolsClient: type | None = None
+    BrowserToolsService: type | None = None
+    BrowserAutomationConfig: type | None = None
+
 
 def build_asgi_app(
     settings: Settings,
@@ -85,11 +97,23 @@ def build_asgi_app(
         restart_callback=restart_callback,
         connected_accounts={"openai": openai_auth, "github_copilot": copilot_auth},
     )
+
+    # Initialize browser tools service if available
+    browser_tools_service = None
+    if BrowserToolsService and BrowserAutomationConfig and BrowserToolsClient:
+        browser_client = BrowserToolsClient(headless=True)
+        browser_config = BrowserAutomationConfig(headless=True)
+        browser_tools_service = BrowserToolsService(
+            client=browser_client,
+            config=browser_config,
+        )
+
     services = ApiServices(
         requests=provider_manager,
         admin=runtime,
         tasks=runtime,
         web_tools=HTTPWebToolsClient(),
+        browser_tools=browser_tools_service,
         code=code_service,
     )
     return RuntimeASGIApp(create_app(services), runtime)

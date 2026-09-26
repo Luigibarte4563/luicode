@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from luicode.application.browser_tools.ports import BrowserToolsPort
 from luicode.application.code_sessions import CodeApplicationPort
 from luicode.application.connected_accounts import (
     ConnectedAccountLoginMode,
@@ -94,4 +95,5 @@ class ApiServices:
     admin: AdminRuntimePort
     tasks: TaskController
     web_tools: WebToolsPort
+    browser_tools: BrowserToolsPort | None = None
     code: CodeApplicationPort | None = None

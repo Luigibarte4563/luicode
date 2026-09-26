@@ -18,8 +18,9 @@
 [![Type checking: Ty](https://img.shields.io/badge/type%20checking-ty-ffcc00.svg?style=for-the-badge)](https://pypi.org/project/ty/)
 [![Code style: Ruff](https://img.shields.io/badge/code%20formatting-ruff-f5a623.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Logging: Loguru](https://img.shields.io/badge/logging-loguru-4ecdc4.svg?style=for-the-badge)](https://github.com/Delgan/loguru)
+[![Browser automation: optional](https://img.shields.io/badge/browser%20automation-optional-8b5cf6.svg?style=for-the-badge)](https://github.com/browser-use/browser-harness)
 
-[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
+[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Browser automation](#browser-automation) · [Manage](#manage-your-installation)
 
 </div>
 
@@ -41,6 +42,7 @@ one configurable proxy with a browser-admin UI.
 - **Terminal, desktop, IDE, or phone.** Work through native launchers, [VS Code](https://code.visualstudio.com/), [Codex App](https://learn.chatgpt.com/docs/app), [JetBrains](https://www.jetbrains.com/), [Discord](https://discord.com/), or [Telegram](https://telegram.org/).
 - **Voice notes in. Code out.** Talk to your agent using local [Whisper](https://github.com/openai/whisper) or [NVIDIA NIM](https://docs.nvidia.com/nim/speech/latest/asr/deploy-asr-models/whisper.html) transcription.
 - **Agent capabilities stay intact.** Stream responses, use tools, preserve native interleaved thinking for maximum performance, send images, and route [Fable](https://www.anthropic.com/claude/fable), [Opus](https://www.anthropic.com/claude/opus), [Sonnet](https://www.anthropic.com/claude/sonnet), and [Haiku](https://www.anthropic.com/claude/haiku) independently with compatible models.
+- **Browser automation (optional).** Enable the `browser` extra to give coding agents the ability to navigate, click, fill forms, and extract data from web pages using Chrome DevTools Protocol — powered by the same engine as [JEV-Ultrafast](https://github.com/browser-use/jev-ultrafast).
 
 Free-tier availability and limits are controlled by each provider and may change.
 
@@ -74,6 +76,14 @@ Windows PowerShell:
 ```
 
 When prompted, choose at least one coding agent and optionally RTK. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
+
+**Optional:** Enable browser automation for web interaction capabilities:
+
+```bash
+uv sync --extra browser
+```
+
+This installs `browser-harness` and `cdp-use` for Chrome DevTools Protocol automation.
 
 ### 2. Start luicode
 
@@ -472,6 +482,70 @@ Local Whisper with CUDA 13.0:
 ```
 
 Restart `luicode-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.
+
+</details>
+
+<details>
+<summary><strong>Browser automation</strong></summary>
+
+Enable browser automation for coding agents to interact with web pages programmatically. This feature uses Chrome DevTools Protocol (CDP) via [browser-harness](https://github.com/browser-use/browser-harness) — the same engine that powers [JEV-Ultrafast](https://github.com/browser-use/jev-ultrafast).
+
+### Install
+
+```bash
+# With the browser extra
+uv sync --extra browser
+```
+
+Or when using the installer, select the browser automation option (if available).
+
+### Requirements
+
+- Chrome or Chromium with remote debugging enabled (managed automatically by browser-harness)
+- The browser-harness daemon will start on first use
+
+### Capabilities
+
+When enabled, coding agents connected through luicode can:
+- **Navigate** to URLs and wait for page load
+- **Observe** page state — get interactive elements (buttons, inputs, dropdowns, links) with labels and metadata
+- **Click** elements by their observed index
+- **Fill** text into input fields, textareas, and comboboxes
+- **Select** options from dropdown menus
+- **Scroll** the page up or down
+- **Wait** for page to settle after interactions
+- **Run multi-step tasks** as a sequence of actions
+
+### For Developers
+
+The browser automation is exposed via the `BrowserToolsPort` protocol in the application layer:
+
+```python
+from luicode.application.browser_tools.ports import BrowserToolsPort
+
+# In your handler/service
+async def my_handler(browser_tools: BrowserToolsPort):
+    await browser_tools.navigate("https://example.com")
+    state = await browser_tools.observe()
+    # state.elements contains indexed interactive elements
+    await browser_tools.click(node_id=5)  # Click the 5th element
+    await browser_tools.fill(node_id=3, text="search query")
+    await browser_tools.wait()
+```
+
+The runtime implementation (`BrowserToolsClient` in `luicode.runtime.browser_tools`) handles:
+- CDP session management via browser-harness
+- Atomic DOM snapshots with element indexing
+- Staleness detection (page fingerprint guards)
+- Post-input observation (autocomplete suggestions, animations)
+- Screenshot capture (optional)
+
+### Notes
+
+- This is an **optional** feature — luicode works fully without it
+- No API keys required (uses local Chrome instance)
+- TypeSafe integration for structured decision-making is not included in this MVP
+- The browser runs in a background tab with focus emulation to prevent throttling
 
 </details>
 

@@ -189,7 +189,7 @@ def test_admin_page_uses_installed_version(monkeypatch, tmp_path):
     assert 'target="_blank"' in response.text
     assert 'rel="noopener noreferrer"' in response.text
     assert 'aria-label="Open luicode on GitHub"' in response.text
-    assert 'src="/admin/assets/9.8.7/app-icon.svg"' in response.text
+    assert 'src="/admin/assets/9.8.7/luicode-wordmark-dark.svg"' in response.text
     assert 'href="/admin/assets/9.8.7/admin.css"' in response.text
     assert 'href="/admin/assets/9.8.7/code_sessions.css"' in response.text
     assert 'src="/admin/assets/9.8.7/model_combobox.js"' in response.text
@@ -256,11 +256,30 @@ def test_admin_versioned_logo_reuses_packaged_app_icon(monkeypatch, tmp_path):
     assert response.content == asset_path.read_bytes()
 
 
+def test_admin_versioned_wordmark_serves_packaged_file(monkeypatch, tmp_path):
+    asset_path = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "luicode"
+        / "api"
+        / "admin_static"
+        / "luicode-wordmark-dark.svg"
+    )
+    _set_home(monkeypatch, tmp_path)
+    response = _local_client(create_test_app()).get(
+        f"/admin/assets/{package_version()}/luicode-wordmark-dark.svg"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    assert response.content == asset_path.read_bytes()
+
+
 @pytest.mark.parametrize(
     "path",
     (
         "/admin",
-        f"/admin/assets/{package_version()}/app-icon.svg",
+        f"/admin/assets/{package_version()}/luicode-wordmark-dark.svg",
         f"/admin/assets/{package_version()}/admin.css",
         f"/admin/assets/{package_version()}/admin.js",
         f"/admin/assets/{package_version()}/code_sessions.css",

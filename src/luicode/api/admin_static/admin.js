@@ -380,41 +380,57 @@ function updateProviderCard(provider) {
   }
   const focused = card.contains(document.activeElement);
   const focusedLabel = focused ? document.activeElement.textContent : null;
-  const cell = document.createElement("div");
-  cell.className = "provider-cell";
-  const title = document.createElement("span");
-  title.className = "provider-title";
-  const name = document.createElement("strong");
-  name.textContent = connectedAccountName(provider);
-  const website = document.createElement("a");
-  website.href = provider.website_url;
-  website.target = "_blank";
-  website.rel = "noopener noreferrer";
+
+  // Header with logo, name, description, meta, and status pill
+  const header = document.createElement("div");
+  header.className = "provider-card-header";
+
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "provider-card-title";
+
+  const nameLink = document.createElement("a");
+  nameLink.href = provider.website_url;
+  nameLink.target = "_blank";
+  nameLink.rel = "noopener noreferrer";
+  nameLink.className = "provider-card-name";
+
   const logo = document.createElement("img");
-  logo.className = "provider-logo";
+  logo.className = "provider-card-logo";
   logo.src = new URL(`providers/${provider.logo_filename}`, adminAssetBase);
   logo.alt = "";
-  logo.width = 20;
-  logo.height = 20;
-  website.append(name, logo);
-  title.appendChild(website);
+  logo.width = 32;
+  logo.height = 32;
+
+  const name = document.createElement("strong");
+  name.textContent = connectedAccountName(provider);
+  nameLink.append(logo, name);
+  titleWrap.appendChild(nameLink);
+
   const desc = document.createElement("p");
-  desc.className = "provider-desc";
+  desc.className = "provider-card-desc";
   desc.textContent = providerHint(provider);
-  const meta = document.createElement("span");
-  meta.className = "provider-meta";
-  meta.hidden = !oauth;
-  const result = document.createElement("span");
-  result.className = "provider-check-result";
-  result.dataset.providerCheckResult = provider.provider_id;
-  result.hidden = true;
-  cell.append(title, desc, meta, result);
+  titleWrap.appendChild(desc);
+
+  // OAuth meta text (account status)
+  if (oauth) {
+    const meta = document.createElement("p");
+    meta.className = "provider-card-meta";
+    meta.textContent = connectedAccountMeta(provider, status);
+    titleWrap.appendChild(meta);
+  }
+
+  // Status pill - moved inside titleWrap so it stacks below name on narrow cards
   const pill = document.createElement("span");
-  pill.className = "provider-pill";
+  pill.className = "provider-card-pill";
   pill.dataset.providerPill = provider.provider_id;
   applyProviderPill(pill, provider);
+  titleWrap.appendChild(pill);
+
+  header.appendChild(titleWrap);
+
+  // Actions
   const actions = document.createElement("div");
-  actions.className = "provider-actions";
+  actions.className = "provider-card-actions";
   if (oauth) populateConnectedAccountActions(provider, status, actions);
   if (provider.settings_keys?.length) {
     const settings = authButton(
@@ -427,16 +443,17 @@ function updateProviderCard(provider) {
     settings.setAttribute("aria-controls", "providerDialog");
     actions.appendChild(settings);
   }
-  const side = document.createElement("div");
-  side.className = "provider-side";
-  side.append(pill, actions);
-  card.replaceChildren(cell, side);
+
+  card.replaceChildren(header, actions);
+
   const next = [...grid.children].find((other) => other !== card &&
     connectedAccountName(provider).localeCompare(providerDisplayName(other.dataset.provider), "en", { sensitivity: "base" }) < 0);
   if (card.parentElement !== grid || card.nextElementSibling !== (next || null)) grid.insertBefore(card, next || null);
+
   document.querySelectorAll("[data-provider-subgroup]").forEach((section) => {
     section.hidden = section.querySelector(".provider-grid").childElementCount === 0;
   });
+
   if (focused) {
     const controls = [...card.querySelectorAll("a[href], button:not(:disabled)")];
     (controls.find((control) => control.textContent === focusedLabel) || actions.querySelector("button:not(:disabled)"))?.focus({ preventScroll: true });
@@ -786,26 +803,37 @@ function renderProviderCheckResult(providerId) {
   const card = document.querySelector(`[data-provider="${providerId}"]`);
   if (!card) return;
   const provider = connectedAccountDescriptor(providerId);
+
+  // Update the status pill
+  const pill = card.querySelector(".provider-card-pill");
+  if (pill) {
+    applyProviderPill(pill, provider);
+    // Override pill text with check result if available
+    if (message) {
+      pill.textContent = message;
+      pill.className = `provider-card-pill ${status}`;
+    }
+  }
+
+  // For OAuth providers, also update the meta text
   if (provider.kind === "connected_account") {
     const account = state.authStatuses.get(providerId);
-    const meta = card.querySelector(".provider-meta");
-    meta.textContent = connectedAccountMeta(provider, account);
-    meta.className = "provider-meta";
-    if (account?.connected && account.state !== "connecting") {
-      meta.classList.add("provider-check-result", status || "checking");
+    const meta = card.querySelector(".provider-card-meta");
+    if (meta) {
+      meta.textContent = connectedAccountMeta(provider, account);
+      meta.className = "provider-card-meta";
+      if (account?.connected && account.state !== "connecting") {
+        meta.classList.add("provider-check-result", status || "checking");
+      }
+      if (account?.state === "error") meta.classList.add("error");
     }
-    if (account?.state === "error") meta.classList.add("error");
-    return;
-  }
-  const result = card.querySelector(".provider-check-result");
-  result.className = `provider-check-result ${status}`;
-  result.textContent = message;
-  result.hidden = !message;
-  if (state.providerId === providerId) {
-    const modalResult = byId("providerDialogCheck");
-    modalResult.className = result.className;
-    modalResult.textContent = message;
-    modalResult.hidden = !message;
+    // Also update dialog
+    if (state.providerId === providerId) {
+      const modalResult = byId("providerDialogCheck");
+      modalResult.className = `provider-check-result ${status}`;
+      modalResult.textContent = message;
+      modalResult.hidden = !message;
+    }
   }
 }
 

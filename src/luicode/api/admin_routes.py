@@ -45,6 +45,7 @@ _ADMIN_ASSET_FILENAMES = frozenset(
         "admin.js",
         "form_controls.js",
         "app-icon.svg",
+        "luicode-wordmark-dark.svg",
         "code_sessions.css",
         "code_sessions.js",
         "session_layout.css",

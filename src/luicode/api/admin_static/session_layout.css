@@ -51,11 +51,16 @@
   .app-shell.session-active .brand {
     flex-direction: row;
     justify-content: flex-start;
+    align-items: center;
     text-align: left;
   }
   .app-shell.session-active .brand-mark {
-    width: 34px;
-    height: 34px;
+    width: 120px;
+    max-width: 40%;
+    aspect-ratio: 1080 / 320;
+    margin-bottom: 0;
+    margin-right: 12px;
+    flex-shrink: 0;
   }
   .app-shell.session-active .section-nav {
     grid-template-columns: repeat(5, minmax(0, 1fr));
