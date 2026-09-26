@@ -14,6 +14,7 @@ from luicode.providers.lmstudio import LMStudioProvider
 from luicode.providers.mistral import MistralProvider
 from luicode.providers.nvidia_nim import NvidiaNimProvider
 from luicode.providers.open_router import OpenRouterProvider
+from luicode.providers.openai_api import OpenAIAPIProvider
 from luicode.providers.openai_chat import (
     OPENAI_CHAT_PROFILES,
     OpenAIChatProvider,
@@ -66,6 +67,7 @@ def test_product_coverage_is_not_satisfied_by_prereq_probes() -> None:
 def test_provider_and_platform_registries_include_builtins() -> None:
     specialized_provider_classes = {
         "openai": OpenAICodexProvider,
+        "openai_api": OpenAIAPIProvider,
         "github_copilot": GitHubCopilotProvider,
         "opencode_zen": OpenCodeProvider,
         "opencode_go": OpenCodeProvider,

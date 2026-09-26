@@ -13,6 +13,7 @@ from luicode.application.ports import (
 )
 from luicode.cli.launchers.catalog_http import catalog_models_from_response
 from luicode.config.settings import Settings
+from luicode.core.json_types import JsonObject
 from luicode.core.model_capabilities import ModelInputModality
 from luicode.harnesses.codex_model_catalog import build_codex_model_catalog
 from luicode.runtime.codex_app_server import CodexHarnessFactory
@@ -41,6 +42,9 @@ class FakeRequestRuntime(RequestRuntimePort):
 
     async def wait_for_catalog(self) -> ModelCatalogSnapshot:
         return ModelCatalogSnapshot(self._settings, self._cached_infos)
+
+    def catalog_status(self) -> JsonObject:
+        raise AssertionError("Catalog publication must not query startup status.")
 
     def current_settings(self) -> Settings:
         return self._settings

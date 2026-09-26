@@ -13,11 +13,11 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json&style=for-the-badge)](https://github.com/astral-sh/uv)
-[![Testing: Pytest](https://img.shields.io/badge/Testing-Pytest-00c0ff.svg?style=for-the-badge)](https://github.com/Luigibarte4563/luicode/actions/workflows/tests.yml)
-[![Type checking: Ty](https://img.shields.io/badge/type%20checking-ty-ffcc00.svg?style=for-the-badge)](https://pypi.org/project/ty/)
-[![Code style: Ruff](https://img.shields.io/badge/code%20formatting-ruff-f5a623.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
-[![Logging: Loguru](https://img.shields.io/badge/logging-loguru-4ecdc4.svg?style=for-the-badge)](https://github.com/Delgan/loguru)
+[![Package Manager: uv](assets/package-manager-uv.svg)](https://github.com/astral-sh/uv)
+[![Testing: Pytest](https://img.shields.io/badge/Testing-Pytest-ad1457.svg?style=for-the-badge)](https://github.com/Luigibarte4563/luicode/actions/workflows/tests.yml)
+[![Type Checker: Ty](https://img.shields.io/badge/Type%20Checker-ty-fdd835.svg?style=for-the-badge)](https://pypi.org/project/ty/)
+[![Formatter: Ruff](https://img.shields.io/badge/Formatter-ruff-bf4b00.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
+[![Logging: Loguru](https://img.shields.io/badge/logging-loguru-00695c.svg?style=for-the-badge)](https://github.com/Delgan/loguru)
 [![Browser automation: optional](https://img.shields.io/badge/browser%20automation-optional-8b5cf6.svg?style=for-the-badge)](https://github.com/browser-use/browser-harness)
 
 [Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Browser automation](#browser-automation) · [Manage](#manage-your-installation)
@@ -34,7 +34,7 @@ one configurable proxy with a browser-admin UI.
 
 ## What You Get
 
-- **53 ToS-friendly providers. 1.3B+ free tokens every month.** Use free, paid, subscription, and local models from one searchable UI without putting your account at risk. luicode follows provider terms and removes integrations if they stop being allowed.
+- **55 ToS-friendly providers. 1.3B+ free tokens every month.** Use free, paid, subscription, and local models from one searchable UI without putting your account at risk. luicode follows provider terms and removes integrations if they stop being allowed.
 - **10 coding agents. One model catalog.** Run [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://github.com/openai/codex), [Pi](https://github.com/earendil-works/pi), [OpenCode](https://github.com/anomalyco/opencode), [Cline](https://github.com/cline/cline), [Hermes](https://github.com/NousResearch/hermes-agent), [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), [Grok Build](https://github.com/xai-org/grok-build), [Muse Code](https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2/), or [Aider](https://aider.chat/) with your luicode models.
 - **Keep coding through provider outages.** After retries are exhausted, luicode automatically tries your next configured model without making you restart the turn—across every client.
 - **Up to 90% fewer terminal-output tokens.** Optional [RTK](https://github.com/rtk-ai/rtk) filters common command output, while five luicode optimizations handle quota probes, command-prefix detection, titles, suggestions, and filepaths without calling a provider.
@@ -152,9 +152,8 @@ managers, follow [OpenCode's migration instructions](https://opencode.ai/v2/docs
 first. For npm v1, run `npm uninstall -g opencode-ai`, then rerun the luicode installer.
 Close OpenCode before upgrading. OpenCode manages its own data upgrades.
 
-RTK integration is temporarily unavailable for OpenCode 2. The installer saves
-the recognized old RTK plugin outside the plugin directory; customized plugins
-need manual migration. RTK continues to work with the other supported agents.
+RTK integration is temporarily unavailable for OpenCode 2. RTK continues to work
+with the other supported agents.
 
 Use `luicode-opencode` for coding and sessions. Use plain `opencode` for commands
 such as upgrades, service management, ACP, and MCP setup.
@@ -198,8 +197,8 @@ luicode-aider
 ## Choose A Provider
 
 1. Open a provider link below for its key, models, or setup instructions.
-2. In the Admin UI, configure the listed setting. For OpenAI, use
-   **Providers → Connected accounts** instead.
+2. In the Admin UI, configure the listed setting. For OpenAI / ChatGPT
+   subscription access, use **Providers → OAuth providers** instead.
 3. Search the `MODEL` dropdown and select a model. If the provider cannot list
    models, enter `<provider-id>/<exact-provider-model-id>` manually.
 4. Click **Apply**.
@@ -218,6 +217,7 @@ from more than one provider before succeeding.
 | [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | `groq/llama-3.3-70b-versatile` |
 | [ClinePass](https://docs.cline.bot/getting-started/clinepass) | `CLINE_API_KEY` | `cline_pass/cline-pass/kimi-k3` |
 | [OpenAI / ChatGPT](https://learn.chatgpt.com/docs/auth) | Connect ChatGPT in the Admin UI | `openai/<model-id>` |
+| [OpenAI API](https://platform.openai.com/api-keys) | `OPENAI_API_KEY` | `openai_api/gpt-5.6-sol` |
 | [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/copilot-sdk/auth/authenticate) | Connect GitHub Copilot in the Admin UI | `github_copilot/<model-id>` |
 | [xAI (Grok)](https://console.x.ai/team/default/api-keys) | `XAI_API_KEY` | `xai/grok-4.5` |
 | [QwenCloud Token Plan](https://home.qwencloud.com/api-keys) | `QWENCLOUD_API_KEY` | `qwencloud/qwen3.7-plus` |
@@ -262,6 +262,7 @@ from more than one provider before succeeding.
 | [Scaleway](https://console.scaleway.com/iam/api-keys) | `SCW_SECRET_KEY` | `scaleway/deepseek/deepseek-v4-flash` |
 | [Lightning AI](https://lightning.ai/) | `LIGHTNING_API_KEY` | `lightning/lightning-ai/Qwen3.8-27B` |
 | [Experiential Labs](https://platform.experientiallabs.ai/) | `EXPLABS_API_KEY` | `experiential/union-alpha` |
+| [Cheaper Inference](https://cheaperinference.com/signup) | `CHEAPER_INFERENCE_API_KEY` | `cheaperinference/gpt-5.4-mini` |
 | [Ollama Cloud](https://ollama.com/settings/keys) | `OLLAMA_API_KEY` | `ollama_cloud/qwen3-coder:480b` |
 | [LM Studio](https://lmstudio.ai/) | `LM_STUDIO_BASE_URL` | `lmstudio/<model-id>` |
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) | `LLAMACPP_BASE_URL` | `llamacpp/<model-id>` |
@@ -272,9 +273,12 @@ from more than one provider before succeeding.
 <details>
 <summary><strong>Provider-specific setup</strong></summary>
 
-- OpenAI uses your ChatGPT subscription rather than an API key. Connect from
+- OpenAI / ChatGPT uses your ChatGPT subscription rather than an API key. Connect from
   **Providers → OAuth providers → OpenAI / ChatGPT → Connect** in the Admin UI
   and finish signing in through your browser. Restart an already-running agent after connecting.
+- OpenAI API uses a separate Platform API key. Enter it under
+  **Providers → Cloud providers → OpenAI API → Configure**. The model list may
+  include IDs that cannot handle coding requests. Choose a text-generation model.
 - GitHub Copilot uses your signed-in GitHub account and subscription. Install
   [Copilot CLI 1.0.83](https://github.com/github/copilot-cli/releases/tag/v1.0.83)
   on PATH, then choose **Providers → OAuth providers → GitHub Copilot → Connect**.
@@ -290,10 +294,10 @@ from more than one provider before succeeding.
   deployment that supports Chat Completions. Enter the deployment name as a
   custom model slug if it does not appear in the model dropdown.
 - Mistral Codestral uses a separate key from Mistral La Plateforme.
-- Kimi Code subscription keys use `kimi_code/`; Kimi API credit keys use
+- Kimi Code subscription keys use `kimi_code/`. Kimi API credit keys use
   `kimi/`. Kimi Code plans are for personal interactive coding-agent use under
   [Kimi's community guidelines](https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html).
-- QwenCloud Coding Plan keys use `qwencloud_coding/`; QwenCloud Token Plan keys
+- QwenCloud Coding Plan keys use `qwencloud_coding/`. QwenCloud Token Plan keys
   use `qwencloud/`. The keys and endpoints are not interchangeable. Coding Plan
   is for local, personal, interactive coding-agent use under the
   [Coding Plan terms](https://www.alibabacloud.com/help/en/model-studio/coding-plan).
@@ -302,7 +306,7 @@ from more than one provider before succeeding.
 - For Amazon Bedrock, set `BEDROCK_BASE_URL` to the URL for the same region as
   the API key and select one of the listed models.
 - Vertex AI uses Google Application Default Credentials instead of an API key.
-  Locally, run `gcloud auth application-default login` once; service-account
+  Locally, run `gcloud auth application-default login` once. Service-account
   files and attached service accounts also work. Set `VERTEX_PROJECT_ID`, and
   optionally change `VERTEX_LOCATION` from its `global` default.
 - Cloudflare requires both its API token and account ID.
@@ -337,9 +341,7 @@ Use the tag shown by `ollama list` with the `ollama/` prefix. `OLLAMA_BASE_URL` 
 <details>
 <summary><strong>Optional model-tier routing</strong></summary>
 
-`MODEL` is the fallback for every request. Select a model for `MODEL_FABLE`, `MODEL_OPUS`, `MODEL_SONNET`, or `MODEL_HAIKU` to override an individual Claude Code tier; select **None** to use `MODEL`.
-
-For example, route Opus to `nvidia_nim/nvidia/nemotron-3-super-120b-a12b`, Sonnet to `open_router/openrouter/free`, Haiku to `lmstudio/qwen3.5-coder`, and keep `MODEL` on `zai/glm-5.2`.
+`MODEL` is the fallback for every request. Select a model for `MODEL_FABLE`, `MODEL_OPUS`, `MODEL_SONNET`, or `MODEL_HAIKU` to override an individual Claude Code tier. Select **None** to use `MODEL`.
 
 </details>
 
@@ -350,7 +352,7 @@ Open **Admin UI → Model config → Reasoning** and select the behavior you wan
 
 | Selection | Behavior |
 | --- | --- |
-| **From client** (default) | Use the effort sent by Claude Code, Codex, Pi, OpenCode, Cline, Hermes, DeepSeek Harness, Grok Build, Muse Code, or Aider. If none is sent, keep the provider default. |
+| **From client** (default) | Use the effort sent by your coding agent. If none is sent, keep the provider default. |
 | **Off** | Request reasoning to be disabled. |
 | **Low**, **Medium**, **High**, **X-High**, or **Max** | Override the client with the selected reasoning level. |
 | **Inherit** (Fable, Opus, Sonnet, and Haiku only) | Use the root Reasoning selection. |
@@ -427,26 +429,16 @@ Configure integrations from **Admin UI → Messaging**, then click **Apply**.
 <details>
 <summary><strong>Voice notes</strong></summary>
 
-Re-run the installer with the command for your voice backend.
+NVIDIA NIM transcription support is included in every installation. In **Admin UI → Messaging → Voice**, enable voice notes, select `nvidia_nim`, and choose a supported model. Configure your **NVIDIA NIM API key** on the Providers page.
+
+For local Whisper on CPU or CUDA, re-run the installer with the local voice option:
 
 macOS/Linux:
-
-NVIDIA NIM transcription:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh" | sh -s -- --voice-nim
-```
 
 Local Whisper on CPU or CUDA:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh" | sh -s -- --voice-local
-```
-
-Both backends:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh" | sh -s -- --voice-all
 ```
 
 Local Whisper with CUDA 13.0:
@@ -457,22 +449,10 @@ curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/script
 
 Windows PowerShell:
 
-NVIDIA NIM transcription:
-
-```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.ps1"))) -VoiceNim
-```
-
 Local Whisper on CPU or CUDA:
 
 ```powershell
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.ps1"))) -VoiceLocal
-```
-
-Both backends:
-
-```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.ps1"))) -VoiceAll
 ```
 
 Local Whisper with CUDA 13.0:
@@ -561,7 +541,7 @@ Stop all running luicode commands, then run:
 luicode-update
 ```
 
-This runs the same installer as above, including its coding-agent prompts and checks. If you use voice support, pass the same voice options used during installation.
+For local voice support, include `--voice-local` (macOS/Linux) or `-VoiceLocal` (Windows), plus your `--torch-backend` or `-TorchBackend` option if used.
 
 If your installation does not have `luicode-update` yet, run the [installer](#install) once to add it.
 
@@ -573,7 +553,7 @@ Rerunning luicode's Windows installer with Muse Code selected installs or update
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install-muse.ps1")))
 ```
 
-To remove only that managed Muse executable while preserving Muse data and other installations:
+To remove the Muse Code copy installed by LUICODE, keeping its data:
 
 ```powershell
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/uninstall-muse.ps1")))
@@ -593,8 +573,7 @@ Stop every running luicode command before uninstalling.
 **Keeps**
 
 - uv and Python
-- Claude Code, Codex, Pi, OpenCode, Cline, Hermes, DeepSeek Harness, Grok Build, Muse Code, Aider, and RTK
-- Shared PATH entries
+- Your coding agents and RTK
 
 macOS/Linux:
 

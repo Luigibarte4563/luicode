@@ -1,6 +1,7 @@
 """Isolated browser-test composition for the local Admin UI."""
 
 import asyncio
+import faulthandler
 import socket
 import sys
 import threading
@@ -23,6 +24,7 @@ from luicode.config.loader import (
     clear_settings_cache,
     get_settings,
 )
+from luicode.config.settings import Settings
 from luicode.core.anthropic.models import MessagesRequest
 from luicode.core.openai_responses import OpenAIResponsesRequest
 from luicode.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
@@ -131,12 +133,28 @@ def admin_client_files():
 
 
 @pytest.fixture
+def provider_load_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    attempted: list[str] = []
+
+    def forbidden(provider_id: str, *_args):
+        attempted.append(provider_id)
+        raise AssertionError(f"Browser fixture loaded real provider: {provider_id}")
+
+    monkeypatch.setattr(
+        "luicode.providers.runtime.runtime._load_constructor", forbidden
+    )
+    yield
+    assert attempted == [], f"Browser fixture loaded real providers: {attempted}"
+
+
+@pytest.fixture
 def admin_base_url(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     code_control: CodeControl,
     admin_client_files,
+    provider_load_guard,
 ) -> Iterator[str]:
     """Serve one fully isolated Admin application on an OS-assigned port."""
 
@@ -202,6 +220,7 @@ def admin_base_url(
 
     provider_secret = "CREDENTIAL[unrecognized-format-987654321]"
     providers: dict[str, BaseProvider] = {
+        "nvidia_nim": _ModelListingProvider(),
         "open_router": _ModelListingProvider(
             frozenset(
                 {
@@ -225,9 +244,17 @@ def admin_base_url(
             error=RuntimeError(f"Provider rejected credential {provider_secret}")
         ),
     }
+
+    async def fixture_provider(provider_id: str, _settings: Settings) -> BaseProvider:
+        if provider_id not in providers:
+            raise AssertionError(f"Missing browser fixture provider: {provider_id}")
+        return providers[provider_id]
+
     manager = ProviderRuntimeManager(
         get_settings(),
-        runtime_factory=lambda snapshot: ProviderRuntime(snapshot, dict(providers)),
+        runtime_factory=lambda snapshot: ProviderRuntime(
+            snapshot, dict(providers), provider_constructor=fixture_provider
+        ),
     )
     runtime = ApplicationRuntime(
         manager,
@@ -322,6 +349,7 @@ def admin_base_url(
         listener.close()
         clear_settings_cache()
         if thread.is_alive():
+            faulthandler.dump_traceback(file=sys.stderr)
             pytest.fail("Admin browser-test server did not stop")
 
 

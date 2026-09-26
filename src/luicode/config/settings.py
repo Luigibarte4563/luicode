@@ -17,11 +17,7 @@ from .model_refs import parse_model_fallbacks
 from .nim import NimSettings
 from .provider_catalog import (
     BEDROCK_DEFAULT_BASE,
-    EXPERIENTIAL_DEFAULT_BASE,
-    LIGHTNING_DEFAULT_BASE,
-    NARAROUTE_DEFAULT_BASE,
     SUPPORTED_PROVIDER_IDS,
-    TOKENROUTER_DEFAULT_BASE,
 )
 from .reasoning import ReasoningPreference
 
@@ -69,6 +65,11 @@ class Settings(BaseModel):
         validate_default=True,
         populate_by_name=True,
         extra="ignore",
+    )
+
+    # ==================== OpenAI Platform API ====================
+    openai_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="OPENAI_API_KEY"
     )
 
     # ==================== Azure OpenAI ====================
@@ -168,18 +169,10 @@ class Settings(BaseModel):
     tokenrouter_api_key: OptionalNonEmptyString = Field(
         default=None, validation_alias="TOKENROUTER_API_KEY"
     )
-    tokenrouter_base_url: NonEmptyString = Field(
-        default=TOKENROUTER_DEFAULT_BASE,
-        validation_alias="TOKENROUTER_BASE_URL",
-    )
 
     # ==================== NaraRoute Config ====================
     nararoute_api_key: OptionalNonEmptyString = Field(
         default=None, validation_alias="NARAROUTE_API_KEY"
-    )
-    nararoute_base_url: NonEmptyString = Field(
-        default=NARAROUTE_DEFAULT_BASE,
-        validation_alias="NARAROUTE_BASE_URL",
     )
 
     # ==================== Poolside AI (OpenAI-compatible) ====================
@@ -196,18 +189,15 @@ class Settings(BaseModel):
     lightning_api_key: OptionalNonEmptyString = Field(
         default=None, validation_alias="LIGHTNING_API_KEY"
     )
-    lightning_base_url: NonEmptyString = Field(
-        default=LIGHTNING_DEFAULT_BASE,
-        validation_alias="LIGHTNING_BASE_URL",
-    )
 
     # ==================== Experiential Labs (OpenAI-compatible) ====================
     experiential_api_key: OptionalNonEmptyString = Field(
         default=None, validation_alias="EXPLABS_API_KEY"
     )
-    experiential_base_url: NonEmptyString = Field(
-        default=EXPERIENTIAL_DEFAULT_BASE,
-        validation_alias="EXPLABS_BASE_URL",
+
+    # ==================== Cheaper Inference (OpenAI-compatible) ====================
+    cheaperinference_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="CHEAPER_INFERENCE_API_KEY"
     )
 
     # ==================== Fireworks AI Config ====================
@@ -393,6 +383,9 @@ class Settings(BaseModel):
     openai_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="OPENAI_PROXY"
     )
+    openai_api_proxy: OptionalNonEmptyString = Field(
+        default=None, validation_alias="OPENAI_API_PROXY"
+    )
     xai_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="XAI_PROXY"
     )
@@ -509,6 +502,9 @@ class Settings(BaseModel):
     )
     experiential_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="EXPLABS_PROXY"
+    )
+    cheaperinference_proxy: OptionalNonEmptyString = Field(
+        default=None, validation_alias="CHEAPER_INFERENCE_PROXY"
     )
     fireworks_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="FIREWORKS_PROXY"
@@ -670,7 +666,7 @@ class Settings(BaseModel):
     )
     # Device: "cpu" | "cuda" | "nvidia_nim"
     # - "cpu"/"cuda": local Whisper (requires voice_local extra: uv sync --extra voice_local)
-    # - "nvidia_nim": NVIDIA NIM Whisper API (requires voice extra: uv sync --extra voice)
+    # - "nvidia_nim": NVIDIA NIM Whisper API (included in the standard installation)
     whisper_device: NonEmptyString = Field(
         default="cpu", validation_alias="WHISPER_DEVICE"
     )

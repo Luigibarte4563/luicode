@@ -283,7 +283,7 @@ printf '%s\n' "$LUICODE_PS_OUTPUT"
         awk = shutil.which("awk", path=self.env["PATH"])
         if awk is None:
             pytest.skip("awk is required for the POSIX process fallback scenario")
-        shutil.copy2(awk, fallback_bin / "awk")
+        shutil.copy(awk, fallback_bin / "awk")
         self.env["LUICODE_PS_OUTPUT"] = process_line
         self.env["PATH"] = str(fallback_bin)
 
@@ -1756,17 +1756,44 @@ def test_install_sh_rejects_unparseable_existing_uv(
     assert not any("astral.sh" in call for call in posix_harness.calls())
 
 
+@pytest.mark.parametrize(
+    ("args", "package"),
+    [
+        ((), "luicode"),
+        (("--voice-local",), "luicode[voice_local]"),
+        (
+            ("--voice-local", "--torch-backend", "cu130"),
+            "luicode[voice_local]",
+        ),
+    ],
+)
 def test_install_sh_voice_flags_only_change_luicode_spec(
     posix_harness: PosixHarness,
+    args: tuple[str, ...],
+    package: str,
 ) -> None:
-    result = posix_harness.run("--voice-all", "--torch-backend", "cu130")
+    result = posix_harness.run(*args)
 
     assert result.returncode == 0, result.stderr
-    assert any(
-        "--torch-backend cu130 luicode[voice,voice_local] @ "
-        "https://github.com/Luigibarte4563/luicode/archive/refs/heads/main.zip" in call
+    install_calls = [
+        call
         for call in posix_harness.calls()
-    )
+        if "tool install" in call and "--refresh-package luicode" in call
+    ]
+    assert len(install_calls) == 1
+    assert package in install_calls[0]
+    assert ("--torch-backend cu130" in install_calls[0]) == ("cu130" in args)
+
+
+@pytest.mark.parametrize("flag", ("--voice-nim", "--voice-all"))
+def test_install_sh_rejects_retired_voice_flags_before_mutation(
+    posix_harness: PosixHarness,
+    flag: str,
+) -> None:
+    result = posix_harness.run(flag)
+
+    assert result.returncode != 0
+    assert posix_harness.calls() == []
 
 
 def test_install_sh_rejects_invalid_options_before_mutation(
@@ -2124,6 +2151,11 @@ class PowerShellHarness:
     def add_client(self, name: str) -> None:
         _write_executable(self.bin_dir / f"{name}.cmd", _batch_client(name))
 
+    def add_installed_clients(self, *, except_for: tuple[str, ...] = ()) -> None:
+        for name in CODING_AGENTS:
+            if name not in except_for:
+                self.add_client(name)
+
     def add_unrelated_pi(self) -> None:
         _write_executable(self.bin_dir / "pi.cmd", _batch_client("unrelated-pi"))
 
@@ -2169,6 +2201,20 @@ exit /b 76
             env=env,
         )
 
+    def run_functions(
+        self, body: str, *args: str, fail_step: str = ""
+    ) -> subprocess.CompletedProcess[str]:
+        """Exercise real installer functions without running the full workflow."""
+        scenario = self.root / "scenario.ps1"
+        scenario.write_text(
+            body + '\nWrite-Output "Installer scenario completed."\n', encoding="utf-8"
+        )
+        self.env["LUICODE_INSTALLER_SCENARIO"] = str(scenario)
+        try:
+            return self.run(*args, fail_step=fail_step)
+        finally:
+            self.env["LUICODE_INSTALLER_SCENARIO"] = ""
+
     def run_interactive(
         self, answers: list[str], *args: str, fail_step: str = ""
     ) -> subprocess.CompletedProcess[str]:
@@ -2188,6 +2234,7 @@ exit /b 76
 def powershell_harness(
     tmp_path: Path,
     request: pytest.FixtureRequest,
+    powershell_module_paths,
 ) -> PowerShellHarness:
     powershell = request.param
     if powershell is None or os.name != "nt":
@@ -2510,6 +2557,20 @@ $fakeArchiveVersionProbe = @'
     }
 '@
 $installerSource = $installerSource.Replace($nativeVersionProbe, $fakeArchiveVersionProbe.TrimEnd())
+if ($env:LUICODE_INSTALLER_SCENARIO) {
+    $tokens = $null
+    $parseErrors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput(
+        $installerSource, [ref] $tokens, [ref] $parseErrors
+    )
+    if ($parseErrors.Count) { throw "Invalid installer source: $parseErrors" }
+    $definitions = @($ast.EndBlock.Statements | Where-Object {
+        $_ -is [System.Management.Automation.Language.FunctionDefinitionAst]
+    })
+    if (-not $definitions.Count) { throw "Installer function definitions missing" }
+    $installerSource = $installerSource.Substring(0, $definitions[-1].Extent.EndOffset) +
+        [Environment]::NewLine + [IO.File]::ReadAllText($env:LUICODE_INSTALLER_SCENARIO)
+}
 $installer = [scriptblock]::Create($installerSource)
 & $installer @args
 """,
@@ -2524,6 +2585,7 @@ $installer = [scriptblock]::Create($installerSource)
                 [str(bin_dir), str(Path(system_root) / "System32"), system_root]
             ),
             "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+            "PSMODULEPATH": powershell_module_paths[powershell],
             "USERPROFILE": str(home),
             "LOCALAPPDATA": str(local_app_data),
             "APPDATA": str(app_data),
@@ -2542,6 +2604,7 @@ $installer = [scriptblock]::Create($installerSource)
             "FAKE_OPENCODE_RELEASE": "",
             "FAKE_OPENCODE_ARCHIVE_VERSION": "",
             "LUICODE_INSTALLER_ANSWERS": "",
+            "LUICODE_INSTALLER_SCENARIO": "",
             "LUICODE_TEST_USER_PATH": "",
         }
     )
@@ -2555,6 +2618,40 @@ $installer = [scriptblock]::Create($installerSource)
     return PowerShellHarness(
         tmp_path, bin_dir, fixtures, tool_bin, log, env, powershell, wrapper
     )
+
+
+class TestPowerShellModuleIsolation:
+    @pytest.fixture(autouse=True)
+    def unrelated_host_module(self, tmp_path, monkeypatch):
+        modules = tmp_path / "host-modules"
+        module = modules / "LuicodeUnrelated"
+        module.mkdir(parents=True)
+        (module / "LuicodeUnrelated.psd1").write_text(
+            "@{RootModule='LuicodeUnrelated.psm1'; ModuleVersion='1.0.0'; "
+            "FunctionsToExport=@('Get-LuicodeUnrelatedProbe')}",
+            encoding="utf-8",
+        )
+        (module / "LuicodeUnrelated.psm1").write_text(
+            "Add-Content -LiteralPath $env:CALL_LOG -Value 'unrelated-module-import'\n"
+            "function Get-LuicodeUnrelatedProbe { 'unrelated' }\n"
+            "Export-ModuleMember -Function Get-LuicodeUnrelatedProbe\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(
+            "PSMODULEPATH",
+            str(modules) + os.pathsep + os.environ.get("PSMODULEPATH", ""),
+        )
+
+    def test_missing_commands_do_not_load_host_modules(self, powershell_harness):
+        result = powershell_harness.run_functions(
+            """$null = Get-ApplicationCommand 'LuicodeUnrelatedProbe'
+$child = Get-PowerShellExecutable
+& $child -NoProfile -Command 'Get-Command LuicodeUnrelatedProbe -CommandType Application -ErrorAction SilentlyContinue; Get-Item -LiteralPath $env:FAKE_FIXTURES | Out-Null; exit 0'
+if ($LASTEXITCODE -ne 0) { throw 'Child command lookup failed' }
+"""
+        )
+        assert result.returncode == 0, result.stderr
+        assert "unrelated-module-import" not in powershell_harness.calls()
 
 
 @pytest.mark.parametrize("rtk", (False, True, None))
@@ -2837,13 +2934,8 @@ def _assert_lookup_is_isolated(
     if present:
         _write_executable(destination / f"{command}{suffix}", make_command(command))
 
-    source = (
-        _repo_root() / "scripts" / f"install.{'ps1' if windows else 'sh'}"
-    ).read_text(encoding="utf-8")
-    if windows:
-        source = (
-            source.split("\nif ($Help) {", 1)[0]
-            + """
+    if isinstance(harness, PowerShellHarness):
+        result = harness.run_functions("""
 $script:OriginalOpenCode = $null
 Add-KnownBinDirectories
 $pathBefore = $env:Path
@@ -2854,13 +2946,9 @@ if ($found -and (-not (Test-Path -LiteralPath $found.Source -PathType Leaf))) {
     throw "Lookup did not return an application"
 }
 Write-Output "lookup isolated"
-"""
-        )
-        installer = harness.root / "query.ps1"
-        installer.write_text(source, encoding="utf-8")
-        harness.env["LUICODE_INSTALLER"] = str(installer)
-        result = harness.run()
+""")
     else:
+        source = (_repo_root() / "scripts/install.sh").read_text(encoding="utf-8")
         source = (
             source.split('\nparse_args "$@"\n', 1)[0]
             + """
@@ -2917,10 +3005,7 @@ def test_install_ps1_lookup_is_isolated(
 def test_install_ps1_lookup_restores_path_after_exception(
     powershell_harness: PowerShellHarness,
 ) -> None:
-    source = (_repo_root() / "scripts/install.ps1").read_text(encoding="utf-8")
-    source = (
-        source.split("\nif ($Help) {", 1)[0]
-        + """
+    result = powershell_harness.run_functions("""
 $script:OriginalOpenCode = $null
 $env:UV_TOOL_BIN_DIR = Join-Path $env:USERPROFILE "exception lookup"
 $pathBefore = $env:Path
@@ -2940,14 +3025,7 @@ catch {
 if (-not $caught) { throw "Expected lookup exception" }
 if ($env:Path -cne $pathBefore) { throw "Failed lookup changed PATH" }
 Write-Output "exception isolated"
-"""
-    )
-    installer = powershell_harness.root / "exception.ps1"
-    installer.write_text(source, encoding="utf-8")
-    powershell_harness.env["LUICODE_INSTALLER"] = str(installer)
-
-    result = powershell_harness.run()
-
+""")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "exception isolated" in result.stdout
     assert powershell_harness.calls() == []
@@ -3143,10 +3221,13 @@ def test_install_ps1_fresh_install_is_verified(
 def test_install_ps1_discovers_grok_in_custom_bin_directory(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     custom_grok_bin = powershell_harness.root / "custom-grok-bin"
     powershell_harness.env["GROK_BIN_DIR"] = str(custom_grok_bin)
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Grok"
+    )
 
     assert result.returncode == 0, result.stderr
     assert (custom_grok_bin / "grok.cmd").is_file()
@@ -3174,12 +3255,15 @@ def test_install_ps1_preserves_upstream_managed_harness_without_parsing_version(
     client: str,
     install_call: str,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     _write_executable(
         powershell_harness.bin_dir / f"{client}.cmd",
         _batch_client(client, version_output="opaque upstream version output"),
     )
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-" + client
+    )
 
     assert result.returncode == 0, result.stderr
     calls = powershell_harness.calls()
@@ -3190,9 +3274,12 @@ def test_install_ps1_preserves_upstream_managed_harness_without_parsing_version(
 def test_install_ps1_delegates_compatible_external_muse_without_adopting_it(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     powershell_harness.add_client("muse")
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Muse"
+    )
 
     assert result.returncode == 0, result.stderr
     calls = powershell_harness.calls()
@@ -3209,10 +3296,13 @@ def test_install_ps1_stops_when_muse_install_fails(
     powershell_harness: PowerShellHarness,
     failure: str,
 ) -> None:
-    result = powershell_harness.run(fail_step=failure)
+    powershell_harness.add_uv("0.12.13")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Muse", fail_step=failure
+    )
 
     assert result.returncode != 0
-    assert "luicode is installed and verified." not in result.stdout
+    assert "Installer scenario completed." not in result.stdout
     _assert_uv_ready_without_luicode_install(powershell_harness.calls())
 
 
@@ -3221,20 +3311,26 @@ def test_install_ps1_stops_when_grok_install_fails(
     powershell_harness: PowerShellHarness,
     failure: str,
 ) -> None:
-    result = powershell_harness.run(fail_step=failure)
+    powershell_harness.add_uv("0.12.13")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Grok", fail_step=failure
+    )
 
     assert result.returncode != 0
-    assert "luicode is installed and verified." not in result.stdout
+    assert "Installer scenario completed." not in result.stdout
     _assert_uv_ready_without_luicode_install(powershell_harness.calls())
 
 
 def test_install_ps1_stops_when_aider_install_fails(
     powershell_harness: PowerShellHarness,
 ) -> None:
-    result = powershell_harness.run(fail_step="aider-install")
+    powershell_harness.add_uv("0.12.13")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Aider", fail_step="aider-install"
+    )
 
     assert result.returncode != 0
-    assert "luicode is installed and verified." not in result.stdout
+    assert "Installer scenario completed." not in result.stdout
     calls = powershell_harness.calls()
     aider_install = (
         "uv:tool install --force --python python3.12 --with pip aider-chat@latest"
@@ -3250,7 +3346,9 @@ def test_install_ps1_discovers_aider_in_custom_uv_tool_bin(
     custom_tool_bin = powershell_harness.root / "custom-tool-bin"
     powershell_harness.env["UV_TOOL_BIN_DIR"] = str(custom_tool_bin)
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Aider"
+    )
 
     assert result.returncode == 0, result.stderr
     assert (custom_tool_bin / "aider.cmd").is_file()
@@ -3279,7 +3377,9 @@ def test_install_ps1_checks_existing_aider_in_custom_uv_tool_bin_before_installi
     result = (
         powershell_harness.run_interactive(["n"] * 9, fail_step=fail_step)
         if interactive
-        else powershell_harness.run(fail_step=fail_step)
+        else powershell_harness.run_functions(
+            "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Aider", fail_step=fail_step
+        )
     )
 
     if fail_step:
@@ -3299,9 +3399,12 @@ def test_install_ps1_checks_existing_aider_in_custom_uv_tool_bin_before_installi
 def test_install_ps1_rejects_broken_existing_aider_without_replacing_it(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     powershell_harness.add_client("aider")
 
-    result = powershell_harness.run(fail_step="aider-verify")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Aider", fail_step="aider-verify"
+    )
 
     assert result.returncode != 0
     calls = powershell_harness.calls()
@@ -3313,9 +3416,12 @@ def test_install_ps1_rejects_broken_existing_aider_without_replacing_it(
 def test_install_ps1_preserves_exact_dsh_preview(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     powershell_harness.add_client("dsh")
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Dsh"
+    )
 
     assert result.returncode == 0, result.stderr
     assert "already matches the supported preview" in result.stdout
@@ -3329,6 +3435,7 @@ def test_install_ps1_replaces_mismatched_dsh_preview(
     powershell_harness: PowerShellHarness,
     interactive: bool,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     (powershell_harness.bin_dir / "dsh.cmd").write_text(
         _batch_client("dsh").replace("0.1.0-rc.8", "0.1.0-rc.7"),
         encoding="utf-8",
@@ -3337,7 +3444,9 @@ def test_install_ps1_replaces_mismatched_dsh_preview(
     result = (
         powershell_harness.run_interactive(["n"] * 9)
         if interactive
-        else powershell_harness.run()
+        else powershell_harness.run_functions(
+            "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Dsh"
+        )
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
@@ -3348,13 +3457,16 @@ def test_install_ps1_replaces_mismatched_dsh_preview(
 def test_install_ps1_rejects_exact_dsh_on_unsupported_node(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     powershell_harness.add_client("dsh")
     (powershell_harness.bin_dir / "node.cmd").write_text(
         _batch_client("node").replace("node 22.19.0", "node 23.9.0"),
         encoding="utf-8",
     )
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Dsh"
+    )
 
     assert result.returncode != 0
     assert "requires Node.js ^22.19.0 or >=24.0.0" in (
@@ -3368,6 +3480,7 @@ def test_install_ps1_rejects_incompatible_node_for_selected_dsh(
     powershell_harness: PowerShellHarness,
     node_version: str,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     (powershell_harness.bin_dir / "dsh.cmd").write_text(
         _batch_client("dsh").replace("0.1.0-rc.8", "0.1.0-rc.7"),
         encoding="utf-8",
@@ -3377,16 +3490,20 @@ def test_install_ps1_rejects_incompatible_node_for_selected_dsh(
         encoding="utf-8",
     )
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Dsh"
+    )
 
     assert result.returncode != 0
-    assert "luicode is installed and verified." not in result.stdout
+    assert "Installer scenario completed." not in result.stdout
     _assert_uv_ready_without_luicode_install(powershell_harness.calls())
 
 
 def test_install_ps1_noninteractive_skips_dsh_without_node(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_installed_clients(except_for=("dsh",))
+    powershell_harness.add_uv("0.12.13")
     (powershell_harness.bin_dir / "node.cmd").unlink()
     (powershell_harness.bin_dir / "npm.cmd").unlink()
 
@@ -3403,20 +3520,26 @@ def test_install_ps1_noninteractive_skips_dsh_without_node(
 def test_install_ps1_stops_when_selected_dsh_install_fails(
     powershell_harness: PowerShellHarness,
 ) -> None:
-    result = powershell_harness.run(fail_step="dsh-install")
+    powershell_harness.add_uv("0.12.13")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Dsh", fail_step="dsh-install"
+    )
 
     assert result.returncode != 0
-    assert "luicode is installed and verified." not in result.stdout
+    assert "Installer scenario completed." not in result.stdout
     _assert_uv_ready_without_luicode_install(powershell_harness.calls())
 
 
 def test_install_ps1_rejects_unsupported_hermes_architecture_before_download(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     powershell_harness.env["PROCESSOR_ARCHITECTURE"] = "MIPS"
     powershell_harness.env["PROCESSOR_ARCHITEW6432"] = "MIPS"
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Hermes"
+    )
 
     assert result.returncode != 0
     assert "does not provide a supported Windows release" in result.stderr
@@ -3431,7 +3554,9 @@ def test_install_ps1_selects_official_opencode_arm64_archive(
     (powershell_harness.bin_dir / "opencode.cmd").unlink()
     powershell_harness.env["PROCESSOR_ARCHITEW6432"] = "ARM64"
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+    )
 
     assert result.returncode == 0, result.stderr
     assert any(
@@ -3446,7 +3571,9 @@ def test_install_ps1_rejects_unsupported_opencode_architecture(
     (powershell_harness.bin_dir / "opencode.cmd").unlink()
     powershell_harness.env["PROCESSOR_ARCHITEW6432"] = "X86"
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+    )
 
     assert result.returncode != 0
     assert "does not provide a supported Windows release" in result.stderr
@@ -3479,11 +3606,14 @@ def test_install_ps1_preserves_existing_rtk_and_configures_selected_agents(
 def test_install_ps1_prepares_custom_claude_config_directory_for_rtk(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     powershell_harness.add_rtk()
     custom_config = powershell_harness.root / "custom-claude"
     powershell_harness.env["CLAUDE_CONFIG_DIR"] = str(custom_config)
 
-    result = powershell_harness.run("-Rtk")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-RtkClaudeConfigDirectory", "-Rtk"
+    )
 
     assert result.returncode == 0, result.stderr
     assert custom_config.is_dir()
@@ -3493,9 +3623,12 @@ def test_install_ps1_prepares_custom_claude_config_directory_for_rtk(
 def test_install_ps1_rejects_conflicting_rtk_command(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     powershell_harness.add_unrelated_rtk()
 
-    result = powershell_harness.run("-Rtk")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Rtk", "-Rtk"
+    )
 
     assert result.returncode != 0
     assert "not a compatible Rust Token Killer installation" in result.stderr
@@ -3516,20 +3649,12 @@ def test_install_ps1_rtk_dry_run_prints_install_and_agent_setup(
     assert "RTK_TELEMETRY_DISABLED=1 rtk init --global --agent pi" in result.stdout
 
 
-@pytest.mark.parametrize(
-    "powershell",
-    _powershells() or (None,),
-    ids=lambda path: Path(path).name if path is not None else "unavailable",
-)
 @pytest.mark.parametrize("valid_checksum", [True, False])
 def test_install_ps1_installs_only_checksum_verified_rtk_archive(
-    powershell: str | None,
-    tmp_path: Path,
+    powershell_harness: PowerShellHarness,
     valid_checksum: bool,
 ) -> None:
-    if powershell is None or os.name != "nt":
-        pytest.skip("PowerShell RTK archive installation runs on Windows hosts")
-
+    tmp_path = powershell_harness.root
     asset_name = "rtk-x86_64-pc-windows-msvc.zip"
     archive_path = tmp_path / asset_name
     with zipfile.ZipFile(archive_path, "w") as archive:
@@ -3538,37 +3663,22 @@ def test_install_ps1_installs_only_checksum_verified_rtk_archive(
     if not valid_checksum:
         checksum = "0" * 64
 
-    installer = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
-    format_argument = _braced_body(installer, "function Format-Argument")
-    install_rtk = _braced_body(installer, "function Install-Rtk")
     script = f"""Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $DryRun = $false
 $RtkReleaseBaseUrl = "https://example.test/releases/download/v0.44.2"
 $RtkWindowsAssetName = "{asset_name}"
 $RtkWindowsAssetSha256 = "{checksum}"
-function Format-Argument {{{format_argument}}}
 function Invoke-RestMethod {{
     [CmdletBinding()]
     param([string] $Uri, [string] $OutFile)
     Copy-Item -LiteralPath $env:RTK_TEST_ARCHIVE -Destination $OutFile
 }}
-function Install-Rtk {{{install_rtk}}}
 Install-Rtk
 """
-    home = tmp_path / "home"
-    home.mkdir()
-    env = os.environ | {
-        "USERPROFILE": str(home),
-        "RTK_TEST_ARCHIVE": str(archive_path),
-    }
-    result = subprocess.run(
-        [powershell, "-NoProfile", "-Command", script],
-        check=False,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    home = Path(powershell_harness.env["USERPROFILE"])
+    powershell_harness.env["RTK_TEST_ARCHIVE"] = str(archive_path)
+    result = powershell_harness.run_functions(script)
 
     installed = home / ".local" / "bin" / "rtk.exe"
     if valid_checksum:
@@ -3583,6 +3693,8 @@ Install-Rtk
 def test_install_ps1_stops_if_windows_icon_export_fails(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_installed_clients()
+    powershell_harness.add_uv("0.12.13")
     result = powershell_harness.run(fail_step="desktop-icon-export")
 
     assert result.returncode != 0
@@ -3594,6 +3706,7 @@ def test_install_ps1_stops_if_windows_icon_export_fails(
 def test_install_ps1_preserves_unowned_desktop_shortcut(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     desktop_shortcut = (
         Path(powershell_harness.env["USERPROFILE"]) / "Desktop" / "luicode.lnk"
     )
@@ -3606,7 +3719,9 @@ def test_install_ps1_preserves_unowned_desktop_shortcut(
     )
     original_shortcut = desktop_shortcut.read_bytes()
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nInstall-Luicode\nConfigure-AndConfirmLuicode"
+    )
 
     assert result.returncode == 0, result.stderr
     assert "not managed by luicode" in result.stdout
@@ -3655,7 +3770,9 @@ def test_install_ps1_replaces_unrelated_pi_command(
     result = (
         powershell_harness.run_interactive(["y"] + ["n"] * 7)
         if interactive
-        else powershell_harness.run()
+        else powershell_harness.run_functions(
+            "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Pi"
+        )
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
@@ -3672,7 +3789,9 @@ def test_install_ps1_discovers_custom_pi_npm_prefix(
     powershell_harness.add_npm_prefix(powershell_harness.root / "custom-npm")
     powershell_harness.add_uv("0.12.13")
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Pi"
+    )
 
     assert result.returncode == 0, result.stderr
     calls = powershell_harness.calls()
@@ -3684,6 +3803,7 @@ def test_install_ps1_discovers_custom_pi_npm_prefix(
 def test_install_ps1_continues_when_pi_is_not_installed(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_installed_clients(except_for=("pi",))
     result = powershell_harness.run(fail_step="pi-skip")
 
     assert result.returncode == 0, result.stderr
@@ -3699,6 +3819,7 @@ def test_install_ps1_continues_when_pi_is_not_installed(
 def test_install_ps1_continues_when_unrelated_pi_is_unchanged(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_installed_clients(except_for=("pi",))
     powershell_harness.add_unrelated_pi()
 
     result = powershell_harness.run(fail_step="pi-skip")
@@ -3715,6 +3836,7 @@ def test_install_ps1_continues_when_unrelated_pi_is_unchanged(
 def test_install_ps1_continues_when_pi_resolution_changes_to_unrelated_command(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_installed_clients(except_for=("pi",))
     powershell_harness.add_unrelated_pi()
     npm_prefix = powershell_harness.root / "custom-npm"
     powershell_harness.add_npm_prefix(npm_prefix)
@@ -3744,10 +3866,15 @@ def test_install_ps1_replaces_obsolete_uv(
     powershell_harness.add_client("pi")
     powershell_harness.add_uv(uv_version)
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions("Add-KnownBinDirectories\nEnsure-Uv")
 
     assert result.returncode == 0, result.stderr
-    assert "uv-install" in powershell_harness.calls()
+    assert powershell_harness.calls() == [
+        "uv:--version",
+        "download:https://astral.sh/uv/install.ps1",
+        "uv-install",
+        "uv:--version",
+    ]
     assert f"uv {uv_version} does not satisfy stable >=0.12.13" in result.stdout
 
 
@@ -3758,7 +3885,7 @@ def test_install_ps1_prioritizes_replacement_uv_from_custom_install_directory(
     powershell_harness.env["UV_INSTALL_DIR"] = str(custom_install_dir)
     powershell_harness.add_uv("0.5.9")
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions("Add-KnownBinDirectories\nEnsure-Uv")
 
     assert result.returncode == 0, result.stderr
     assert "Verified uv 0.12.13." in result.stdout
@@ -3779,7 +3906,7 @@ def test_install_ps1_prioritizes_forced_cargo_home_uv_install_layout(
     )
     powershell_harness.add_uv("0.5.9")
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions("Add-KnownBinDirectories\nEnsure-Uv")
 
     assert result.returncode == 0, result.stderr
     assert "Verified uv 0.12.13." in result.stdout
@@ -3795,7 +3922,7 @@ def test_install_ps1_uv_install_dir_takes_precedence_over_unmanaged_install(
     powershell_harness.env["UV_UNMANAGED_INSTALL"] = str(unmanaged_bin)
     powershell_harness.add_uv("0.5.9")
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions("Add-KnownBinDirectories\nEnsure-Uv")
 
     assert result.returncode == 0, result.stderr
     assert (install_bin / "uv.cmd").is_file()
@@ -3809,7 +3936,7 @@ def test_install_ps1_prioritizes_replacement_uv_from_unmanaged_install_directory
     powershell_harness.env["UV_UNMANAGED_INSTALL"] = str(unmanaged_bin)
     powershell_harness.add_uv("0.5.9")
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions("Add-KnownBinDirectories\nEnsure-Uv")
 
     assert result.returncode == 0, result.stderr
     assert "Verified uv 0.12.13." in result.stdout
@@ -3826,7 +3953,7 @@ def test_install_ps1_replaces_prerelease_uv(
     powershell_harness.add_client("pi")
     powershell_harness.add_uv(version)
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions("Add-KnownBinDirectories\nEnsure-Uv")
 
     assert result.returncode == 0, result.stderr
     assert f"uv {version} does not satisfy stable >=0.12.13" in result.stdout
@@ -3863,9 +3990,41 @@ def test_install_ps1_stops_without_success_on_each_failure(
     powershell_harness: PowerShellHarness,
     failure: str,
 ) -> None:
+    if failure in {
+        "luicode-install",
+        "path-update",
+        "luicode-missing",
+        "luicode-verify",
+    }:
+        powershell_harness.add_installed_clients()
+        powershell_harness.add_uv("0.12.13")
     if failure in {"opencode-download", "opencode-archive"}:
         (powershell_harness.bin_dir / "opencode.cmd").unlink()
-    result = powershell_harness.run(fail_step=failure)
+    # Full workflows cover each phase's abort; component cases cover its details.
+    if failure in {
+        "uv-install",
+        "claude-verify",
+        "luicode-install",
+        "path-update",
+        "luicode-missing",
+        "luicode-verify",
+    }:
+        result = powershell_harness.run(fail_step=failure)
+    else:
+        component = {
+            "uv": "Ensure-Uv",
+            "claude": "Ensure-ClaudeCode",
+            "codex": "Ensure-Codex",
+            "pi": "Ensure-Pi",
+            "opencode": "Ensure-OpenCode",
+            "cline": "Ensure-Cline",
+        }[failure.split("-", 1)[0]]
+        setup = '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\n'
+        if component != "Ensure-Uv":
+            powershell_harness.add_uv("0.12.13")
+            setup += "Ensure-Uv\n"
+        result = powershell_harness.run_functions(setup + component, fail_step=failure)
+        assert "Installer scenario completed." not in result.stdout
 
     assert result.returncode != 0
     assert "luicode is installed and verified." not in result.stdout
@@ -3913,9 +4072,13 @@ def test_install_ps1_dry_run_never_executes_commands(
 def test_install_ps1_rejects_broken_existing_client_without_replacing_it(
     powershell_harness: PowerShellHarness,
 ) -> None:
+    powershell_harness.add_uv("0.12.13")
     powershell_harness.add_client("claude")
 
-    result = powershell_harness.run(fail_step="claude-verify")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-ClaudeCode",
+        fail_step="claude-verify",
+    )
 
     assert result.returncode != 0
     calls = powershell_harness.calls()
@@ -3931,23 +4094,62 @@ def test_install_ps1_rejects_unparseable_existing_uv(
     powershell_harness.add_client("pi")
     powershell_harness.add_uv("not-a-version")
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions("Add-KnownBinDirectories\nEnsure-Uv")
 
     assert result.returncode != 0
     assert not any("astral.sh" in call for call in powershell_harness.calls())
 
 
+@pytest.mark.parametrize(
+    ("args", "package"),
+    [
+        ((), "luicode"),
+        (("-VoiceLocal",), "luicode[voice_local]"),
+        (
+            ("-VoiceLocal", "-TorchBackend", "cu130"),
+            "luicode[voice_local]",
+        ),
+    ],
+)
 def test_install_ps1_voice_flags_only_change_luicode_spec(
     powershell_harness: PowerShellHarness,
+    args: tuple[str, ...],
+    package: str,
 ) -> None:
-    result = powershell_harness.run("-VoiceAll", "-TorchBackend", "cu130")
+    powershell_harness.add_uv("0.12.13")
+    result = powershell_harness.run_functions(
+        "Add-KnownBinDirectories\nEnsure-Uv\nInstall-Luicode", *args
+    )
 
     assert result.returncode == 0, result.stderr
-    assert any(
-        '--torch-backend cu130 "luicode[voice,voice_local] @ '
-        'https://github.com/Luigibarte4563/luicode/archive/refs/heads/main.zip"' in call
+    install_calls = [
+        call
         for call in powershell_harness.calls()
-    )
+        if "tool install" in call and "--refresh-package luicode" in call
+    ]
+    assert len(install_calls) == 1
+    assert package in install_calls[0]
+    assert ("--torch-backend cu130" in install_calls[0]) == ("cu130" in args)
+
+
+@pytest.mark.parametrize("flag", ("-VoiceNim", "-VoiceAll"))
+def test_install_ps1_rejects_retired_voice_flags_before_mutation(
+    powershell_harness: PowerShellHarness,
+    flag: str,
+) -> None:
+    result = powershell_harness.run(flag)
+
+    assert result.returncode != 0
+    assert powershell_harness.calls() == []
+
+
+def test_install_ps1_rejects_torch_backend_without_local_voice(
+    powershell_harness: PowerShellHarness,
+) -> None:
+    result = powershell_harness.run("-TorchBackend", "cu130")
+
+    assert result.returncode != 0
+    assert powershell_harness.calls() == []
 
 
 @pytest.mark.parametrize("command_name", LUICODE_COMMANDS)
@@ -3957,7 +4159,13 @@ def test_install_ps1_rejects_running_luicode_before_mutation(
 ) -> None:
     powershell_harness.env["LUICODE_RUNNING_COMMAND"] = command_name
 
-    result = powershell_harness.run()
+    # One full workflow checks placement before mutation; the other names test
+    # the same guard's exact process matching without repeating startup.
+    result = (
+        powershell_harness.run()
+        if command_name == "luicode-server"
+        else powershell_harness.run_functions("Assert-NoLuicodeProcessesRunning")
+    )
 
     assert result.returncode != 0
     assert powershell_harness.calls() == []
@@ -3988,7 +4196,7 @@ def test_install_ps1_ignores_similarly_named_process(
 ) -> None:
     powershell_harness.env["LUICODE_RUNNING_COMMAND"] = "luicode-server-helper"
 
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions("Assert-NoLuicodeProcessesRunning")
 
     assert result.returncode == 0, result.stderr
 
@@ -4005,6 +4213,7 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
         assert "@earendil-works/pi-coding-agent" not in text
         assert "git+" not in text
         assert "git --version" not in text
+        # luicode installs from its own repository archive rather than PyPI.
         assert (
             "https://github.com/Luigibarte4563/luicode/archive/refs/heads/main.zip"
             in text
@@ -4317,6 +4526,9 @@ def _assert_native_opencode_migration(
 ) -> None:
     binary = _prepare_native_opencode_v1(harness)
     original = binary.read_bytes()
+    if isinstance(harness, PowerShellHarness):
+        harness.add_installed_clients(except_for=("opencode",))
+        harness.add_uv("0.12.13")
     result = harness.run()
     assert result.returncode == 0, result.stderr
     assert binary.read_bytes() != original
@@ -4329,7 +4541,13 @@ def _assert_native_opencode_migration(
         for call in harness.calls()
     )
     harness.log.unlink()
-    result = harness.run()
+    result = (
+        harness.run_functions(
+            '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+        )
+        if isinstance(harness, PowerShellHarness)
+        else harness.run()
+    )
     assert result.returncode == 0, result.stderr
     assert not any("opencode.ai" in call for call in harness.calls())
 
@@ -4371,7 +4589,9 @@ def test_install_ps1_opencode_rejects_external_incompatible_version(
     path = powershell_harness.bin_dir / "opencode.cmd"
     _write_executable(path, _batch_client("opencode", version_output=version))
     original = path.read_bytes()
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+    )
     assert result.returncode != 0
     assert str(path) in "".join(result.stderr.split())
     assert path.read_bytes() == original
@@ -4403,7 +4623,13 @@ def _assert_opencode_rtk_cleanup(
     database = home / ".local" / "share" / "opencode" / "opencode.db"
     database.parent.mkdir(parents=True)
     database.write_bytes(b"user-owned database sentinel")
-    result = harness.run()
+    result = (
+        harness.run_functions(
+            '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+        )
+        if isinstance(harness, PowerShellHarness)
+        else harness.run()
+    )
     assert database.read_bytes() == b"user-owned database sentinel"
     assert list(database.parent.iterdir()) == [database]
     assert previous_backup.read_bytes() == b"prior backup"
@@ -4469,7 +4695,13 @@ def _assert_opencode_linked_rtk_parent_is_preserved(
     else:
         linked.symlink_to(shared, target_is_directory=True)
     try:
-        result = harness.run()
+        result = (
+            harness.run_functions(
+                '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+            )
+            if isinstance(harness, PowerShellHarness)
+            else harness.run()
+        )
         assert result.returncode != 0
         assert "manually" in result.stderr
         assert plugin.read_bytes() == contents
@@ -4517,7 +4749,13 @@ def _assert_opencode_starting_late_blocks_mutation(
     plugin.write_bytes(contents)
     harness.env["LUICODE_RUNNING_COMMAND"] = command
     harness.env["LUICODE_RUNNING_PHASE"] = phase
-    result = harness.run()
+    result = (
+        harness.run_functions(
+            '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+        )
+        if isinstance(harness, PowerShellHarness)
+        else harness.run()
+    )
     assert Path(harness.env["LUICODE_PROCESS_MARKER"]).exists()
     assert result.returncode != 0
     assert "Close OpenCode" in result.stderr
@@ -4642,7 +4880,13 @@ def _assert_opencode_validates_current_path(
     plugin.write_bytes(contents)
 
     # The external v2 wins initially; adding the native directory puts it first.
-    result = harness.run()
+    result = (
+        harness.run_functions(
+            '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+        )
+        if isinstance(harness, PowerShellHarness)
+        else harness.run()
+    )
     assert native.read_bytes() == original
     assert not any("opencode.ai" in call for call in harness.calls())
     if native_version.startswith("1."):
@@ -4740,7 +4984,13 @@ def _assert_opencode_link_requires_manual_migration(
         native.symlink_to(target)
     except OSError as exc:
         pytest.skip(f"symlink creation unavailable: {exc}")
-    result = harness.run()
+    result = (
+        harness.run_functions(
+            '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+        )
+        if isinstance(harness, PowerShellHarness)
+        else harness.run()
+    )
     assert result.returncode != 0
     assert "linked" in result.stderr
     assert target.read_bytes() == original
@@ -4767,7 +5017,9 @@ def test_install_ps1_opencode_rejects_invalid_release_before_replacement(
     binary = _prepare_native_opencode_v1(powershell_harness)
     original = binary.read_bytes()
     powershell_harness.env["FAKE_OPENCODE_RELEASE"] = version
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+    )
     assert result.returncode != 0
     assert binary.read_bytes() == original
     assert not any(
@@ -4781,7 +5033,9 @@ def test_install_ps1_opencode_rejects_mismatched_archive_before_replacement(
     binary = _prepare_native_opencode_v1(powershell_harness)
     original = binary.read_bytes()
     powershell_harness.env["FAKE_OPENCODE_ARCHIVE_VERSION"] = "opencode v1.18.31"
-    result = powershell_harness.run()
+    result = powershell_harness.run_functions(
+        '$script:OriginalOpenCode = Get-ApplicationCommand "opencode"\nAdd-KnownBinDirectories\nEnsure-OpenCode'
+    )
     assert result.returncode != 0
     assert binary.read_bytes() == original
 

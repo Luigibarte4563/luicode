@@ -197,12 +197,11 @@ Native **Codex sessions in your browser** with real-time and background support:
 - Requires delete message permission in groups
 - Same command set as Discord
 
-### Voice Notes (Optional)
+### Voice Notes
 | Backend | Install Flag | Requirements |
 |---------|--------------|--------------|
-| **NVIDIA NIM Whisper** | `--voice-nim` | `NVIDIA_NIM_API_KEY` |
+| **NVIDIA NIM Whisper** | included by default | `NVIDIA_NIM_API_KEY` |
 | **Local Whisper (CPU/CUDA)** | `--voice-local` | `uv sync --extra voice_local` |
-| **Both** | `--voice-all` | Both sets of deps |
 
 - Enable in Admin UI → Messaging → Voice
 - Select device: `cpu`, `cuda`, or `nvidia_nim`
@@ -314,8 +313,7 @@ uv sync --extra browser
 # Voice (local Whisper)
 uv sync --extra voice_local
 
-# Voice (NVIDIA NIM)
-uv sync --extra voice
+# Voice (NVIDIA NIM) ships in the standard install
 ```
 
 ### Update

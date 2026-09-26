@@ -86,6 +86,8 @@ LLM7_DEFAULT_BASE = "https://api.llm7.io/v1"
 LIGHTNING_DEFAULT_BASE = "https://lightning.ai/api/v1"
 # Experiential Labs OpenAI-compatible Chat Completions gateway.
 EXPERIENTIAL_DEFAULT_BASE = "https://api.experientiallabs.ai/v1"
+# Cheaper Inference OpenAI-compatible Chat Completions gateway.
+CHEAPERINFERENCE_DEFAULT_BASE = "https://api.cheaperinference.com/v1"
 # Agnes AI OpenAI-compatible Chat Completions API.
 AGNES_DEFAULT_BASE = "https://apihub.agnes-ai.com/v1"
 # ZenMux OpenAI-compatible Chat Completions gateway.
@@ -184,6 +186,17 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         auth_kind=ProviderAuthKind.CONNECTED_ACCOUNT,
         default_base_url=OPENAI_CODEX_DEFAULT_BASE,
         proxy_attr="openai_proxy",
+    ),
+    "openai_api": ProviderDescriptor(
+        provider_id="openai_api",
+        display_name="OpenAI API",
+        website_url="https://platform.openai.com/",
+        logo_filename="openai.svg",
+        credential_env="OPENAI_API_KEY",
+        credential_url="https://platform.openai.com/api-keys",
+        credential_attr="openai_api_key",
+        default_base_url="https://api.openai.com/v1",
+        proxy_attr="openai_api_proxy",
     ),
     "github_copilot": ProviderDescriptor(
         provider_id="github_copilot",
@@ -608,7 +621,6 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://www.tokenrouter.com/",
         credential_attr="tokenrouter_api_key",
         default_base_url=TOKENROUTER_DEFAULT_BASE,
-        base_url_attr="tokenrouter_base_url",
         proxy_attr="tokenrouter_proxy",
     ),
     "nararoute": ProviderDescriptor(
@@ -620,7 +632,6 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://router.bynara.id/keys",
         credential_attr="nararoute_api_key",
         default_base_url=NARAROUTE_DEFAULT_BASE,
-        base_url_attr="nararoute_base_url",
         proxy_attr="nararoute_proxy",
     ),
     "poolside": ProviderDescriptor(
@@ -665,7 +676,6 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://lightning.ai/lightning-ai/model-apis/models",
         credential_attr="lightning_api_key",
         default_base_url=LIGHTNING_DEFAULT_BASE,
-        base_url_attr="lightning_base_url",
         proxy_attr="lightning_proxy",
     ),
     "experiential": ProviderDescriptor(
@@ -677,8 +687,18 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://platform.experientiallabs.ai/settings/api-keys",
         credential_attr="experiential_api_key",
         default_base_url=EXPERIENTIAL_DEFAULT_BASE,
-        base_url_attr="experiential_base_url",
         proxy_attr="experiential_proxy",
+    ),
+    "cheaperinference": ProviderDescriptor(
+        provider_id="cheaperinference",
+        display_name="Cheaper Inference",
+        website_url="https://cheaperinference.com/",
+        logo_filename="cheaperinference.svg",
+        credential_env="CHEAPER_INFERENCE_API_KEY",
+        credential_url="https://cheaperinference.com/signup",
+        credential_attr="cheaperinference_api_key",
+        default_base_url=CHEAPERINFERENCE_DEFAULT_BASE,
+        proxy_attr="cheaperinference_proxy",
     ),
     "ollama_cloud": ProviderDescriptor(
         provider_id="ollama_cloud",
