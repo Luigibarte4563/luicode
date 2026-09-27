@@ -18,7 +18,7 @@ def _refresh_openrouter_models(page: Page) -> None:
     card = page.locator('[data-provider="open_router"]')
     dialog = open_provider(page, "open_router")
     dialog.get_by_role("button", name="Refresh models", exact=True).click()
-    expect(card.locator(".provider-check-result")).to_have_text("3 models available")
+    expect(card.locator("[data-provider-pill]")).to_have_text("3 models available")
     close_provider(page)
     page.get_by_role("button", name="Model config", exact=True).click()
 

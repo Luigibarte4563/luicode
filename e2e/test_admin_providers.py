@@ -106,7 +106,7 @@ def test_configured_provider_check_keeps_readiness_and_adds_models(
     _open_admin(page, admin_base_url, {"width": 1280, "height": 720})
     card = page.locator('[data-provider="open_router"]')
 
-    expect(card.locator(".provider-check-result")).to_have_text("3 models available")
+    expect(card.locator("[data-provider-pill]")).to_have_text("3 models available")
     expect(card.get_by_role("button", name="Manage", exact=True)).to_have_class(
         "secondary-button"
     )
@@ -118,7 +118,7 @@ def test_configured_provider_check_keeps_readiness_and_adds_models(
         "button", name="Refresh models", exact=True
     ).click()
 
-    expect(card.locator(".provider-check-result")).to_have_text("3 models available")
+    expect(card.locator("[data-provider-pill]")).to_have_text("3 models available")
     expect(card.get_by_role("button", name="Manage", exact=True)).to_have_class(
         "secondary-button"
     )
@@ -154,7 +154,11 @@ def test_startup_model_count_handles_empty_and_single_model_catalogs(
     expect(page.locator('[data-provider-pill="open_router"]')).to_have_text(
         "1 model available" if models else "0 models available"
     )
-    expect(page.locator('[data-provider-pill="nvidia_nim"]')).to_be_hidden()
+    # A provider with no discovered catalog falls back to its configuration
+    # state instead of claiming a model count.
+    expect(page.locator('[data-provider-pill="nvidia_nim"]')).to_have_text(
+        "not configured"
+    )
 
 
 @pytest.mark.parametrize("manual_result", ["pending", "success", "failure"])
@@ -251,7 +255,7 @@ def test_provider_check_failure_is_separate_and_never_exposes_exception_text(
     page.on("console", record_console)
     _open_admin(page, admin_base_url, {"width": 1280, "height": 720})
     card = page.locator('[data-provider="groq"]')
-    expect(card.locator(".provider-check-result")).to_have_text(
+    expect(card.locator("[data-provider-pill]")).to_have_text(
         "Could not load models. Check the provider's settings and retry."
     )
     card.locator("[data-provider-settings]").click()
@@ -259,7 +263,7 @@ def test_provider_check_failure_is_separate_and_never_exposes_exception_text(
         "button", name="Refresh models", exact=True
     ).click()
 
-    result = card.locator(".provider-check-result")
+    result = card.locator("[data-provider-pill]")
     expect(result).to_have_text(
         "Unavailable: Could not refresh this provider's models. "
         "Verify its configuration and access."
@@ -319,7 +323,9 @@ def test_admin_loading_finishes_before_local_availability_checks(
     expect(page.locator('[data-provider-pill="llamacpp"]')).to_have_text(
         "Unavailable: http://localhost:8080/v1 returned HTTP 503"
     )
-    expect(page.locator('[data-provider-pill="ollama"]')).to_be_hidden()
+    # A provider reporting missing_url is skipped by the availability sweep, so
+    # its pill keeps the configured state instead of a reachability message.
+    expect(page.locator('[data-provider-pill="ollama"]')).to_have_text("connected")
     expect(
         page.locator('[data-provider="lmstudio"]').get_by_role(
             "button", name="Manage", exact=True
@@ -352,7 +358,7 @@ def test_local_availability_failure_does_not_fail_admin_loading(
 
     for provider_id in ("lmstudio", "llamacpp", "ollama"):
         card = page.locator(f'[data-provider="{provider_id}"]')
-        expect(card.locator(".provider-check-result")).to_have_text(
+        expect(card.locator("[data-provider-pill]")).to_have_text(
             "Availability check failed. Use Test to retry."
         )
         expect(card.get_by_role("button", name="Manage", exact=True)).to_have_class(
@@ -386,7 +392,7 @@ def test_manual_provider_test_takes_precedence_over_automatic_availability(
     dialog = open_provider(page, "lmstudio")
     with page.expect_request("**/admin/api/providers/lmstudio/test"):
         dialog.get_by_role("button", name="Test", exact=True).click()
-    result = card.locator(".provider-check-result")
+    result = card.locator("[data-provider-pill]")
     expect(result).to_have_text("Checking...")
     if manual_finished:
         manual.pop().fulfill(

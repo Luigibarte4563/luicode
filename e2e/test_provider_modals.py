@@ -97,7 +97,7 @@ def test_provider_groups_sort_each_subgroup_and_keep_setup_separate_from_health(
             section = page.locator(
                 f'[data-provider-group="{group}"] [data-provider-subgroup="{subgroup}"]'
             )
-            names = section.locator(".provider-title strong").all_text_contents()
+            names = section.locator(".provider-card-name strong").all_text_contents()
             assert names == sorted(names, key=str.casefold)
     expect(
         page.locator(
