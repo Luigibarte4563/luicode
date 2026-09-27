@@ -44,6 +44,7 @@ Repository = "https://github.com/Luigibarte4563/luicode"
 Issues = "https://github.com/Luigibarte4563/luicode/issues"
 
 [project.scripts]
+luicode = "luicode.cli.entrypoints:serve"
 luicode-server = "luicode.cli.entrypoints:serve"
 luicode-claude = "luicode.cli.launchers.claude:launch"
 luicode-codex = "luicode.cli.launchers.codex:launch"

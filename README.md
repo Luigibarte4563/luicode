@@ -77,10 +77,39 @@ curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/script
 
 #### Android (Termux)
 
+Install [Termux](https://f-droid.org/packages/com.termux/) from F-Droid first,
+then run this single command:
+
 ```bash
-# Install Termux from F-Droid first, then run:
 curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh" | sh
 ```
+
+That is the whole install. The installer detects Termux automatically and:
+
+- updates the Termux package lists and installs only the packages you are
+  missing (`python`, `git`, `curl`)
+- checks that Python is new enough for LUICode (3.14 or newer)
+- keeps the source checkout in `~/.luicode-src` — never in `~/.luicode`, which
+  holds your configuration and data
+- installs LUICode into that checkout with `pip install -e .`
+- adds the directory holding `luicode` and `luicode-server` to your `PATH`
+  from `~/.bashrc` or `~/.zshrc`, inside a single managed `# >>> LUICode PATH >>>`
+  block so reruns never duplicate it
+- verifies that both commands run, and prints the web interface URL
+
+Open a **new** Termux session afterwards. Then:
+
+```bash
+luicode-server
+```
+
+See [docs/android.md](docs/android.md) for persistence, wake locks, LAN access,
+and how to update or uninstall.
+
+Note: coding agents (Claude Code, Codex, OpenCode, …) are installed separately
+with the Linux installer described above; the Termux one-command install covers
+the gateway itself. `termux-wake-lock` is never run for you — the installer only
+prints it as an optional tip.
 
 See [docs/android.md](docs/android.md) for complete Android/Termux setup including persistence, wake locks, and LAN access.
 
@@ -114,11 +143,13 @@ luicode-server
 
 #### Android (Termux)
 
-Run:
+Open a **new** Termux session, then run:
 
 ```bash
 luicode-server
 ```
+
+`luicode` is an alias for the same server, so either works.
 
 For background persistence, acquire a wake lock and disable battery optimization:
 
@@ -126,6 +157,9 @@ For background persistence, acquire a wake lock and disable battery optimization
 termux-wake-lock
 luicode-server
 ```
+
+The server listens on port **8082** by default, so the Admin UI is at
+<http://127.0.0.1:8082/admin>. Change it with `PORT` in `~/.luicode/.env`.
 
 See [docs/android.md](docs/android.md) for auto-start (Termux:Boot), notifications (Termux:API), and LAN access.
 

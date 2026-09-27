@@ -641,6 +641,10 @@ printf '%s  %s\n' "$checksum" "$1"
     env.pop("UV_TOOL_BIN_DIR", None)
     env.pop("CARGO_HOME", None)
     env.pop("GROK_BIN_DIR", None)
+    # These scenarios cover the Linux/macOS uv tool flow. Termux takes a
+    # separate path, so a host Termux session must not leak into them.
+    env.pop("TERMUX_VERSION", None)
+    env.pop("PREFIX", None)
     return PosixHarness(tmp_path, bin_dir, fixtures, tool_bin, log, env)
 
 
