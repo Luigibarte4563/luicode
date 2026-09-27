@@ -26,6 +26,8 @@ uv python install 3.14.0
 uv run luicode-server
 ```
 
+**Android/Termux:** Install Termux from F-Droid, then run the installer. See [docs/android.md](docs/android.md) for details.
+
 Use `uv run` for Python commands. Do not run the project with a global Python interpreter.
 
 ## Quality Checks

@@ -42,6 +42,22 @@ tool_bin=""
 pi_available=0
 rtk_path=""
 
+# Android/Termux detection
+is_termux() {
+    case "${PREFIX:-}" in
+        *com.termux*) return 0 ;;
+    esac
+    case "$(uname -o 2>/dev/null || true)" in
+        Android) return 0 ;;
+    esac
+    return 1
+}
+
+TERMUX=0
+if is_termux; then
+    TERMUX=1
+fi
+
 show_usage() {
     cat <<'USAGE'
 Usage: install.sh [options]
@@ -49,7 +65,7 @@ Usage: install.sh [options]
 Installs or updates luicode and lets you choose which coding agents to install or verify.
 
 Options:
-  --voice-local            Install local Whisper voice transcription support.
+  --voice-local            Install local Whisper voice transcription support (not available on Android/Termux).
   --torch-backend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   --rtk                    Install and configure RTK for the selected coding agents.
   --dry-run                Print commands without running them.
@@ -140,6 +156,18 @@ choose_coding_agents() {
     exec 3<"$selection_input"
     exec 4>"$selection_output"
 
+    if [ "$TERMUX" -eq 1 ]; then
+        printf '\nNote: Running on Android/Termux.\n' >&4
+        printf 'The following are NOT supported on Android:\n' >&4
+        printf '  - Local Whisper voice transcription (use NVIDIA NIM remote instead)\n' >&4
+        printf '  - Hermes Agent (no ARM64 Linux release)\n' >&4
+        printf '  - Muse Code (no Android/Termux support)\n' >&4
+        printf '  - Browser automation (no embeddable Chromium in Termux)\n' >&4
+        printf '\n' >&4
+        install_hermes=0
+        install_muse=0
+    fi
+
     while :; do
         if select_coding_agent claude "Claude Code" luicode-claude; then
             install_claude=1
@@ -173,15 +201,17 @@ choose_coding_agents() {
             install_cline=0
         fi
 
-        if [ "$install_hermes" -eq 1 ]; then
-            hermes_default=yes
-        else
-            hermes_default=no
-        fi
-        if select_coding_agent hermes "Hermes Agent" luicode-hermes "$hermes_default"; then
-            install_hermes=1
-        else
-            install_hermes=0
+        if [ "$TERMUX" -eq 0 ]; then
+            if [ "$install_hermes" -eq 1 ]; then
+                hermes_default=yes
+            else
+                hermes_default=no
+            fi
+            if select_coding_agent hermes "Hermes Agent" luicode-hermes "$hermes_default"; then
+                install_hermes=1
+            else
+                install_hermes=0
+            fi
         fi
 
         if [ "$install_dsh" -eq 1 ]; then
@@ -206,15 +236,17 @@ choose_coding_agents() {
             install_grok=0
         fi
 
-        if [ "$install_muse" -eq 1 ]; then
-            muse_default=yes
-        else
-            muse_default=no
-        fi
-        if select_coding_agent muse "Muse Code" luicode-muse "$muse_default"; then
-            install_muse=1
-        else
-            install_muse=0
+        if [ "$TERMUX" -eq 0 ]; then
+            if [ "$install_muse" -eq 1 ]; then
+                muse_default=yes
+            else
+                muse_default=no
+            fi
+            if select_coding_agent muse "Muse Code" luicode-muse "$muse_default"; then
+                install_muse=1
+            else
+                install_muse=0
+            fi
         fi
 
         if [ "$install_aider" -eq 1 ]; then
@@ -863,6 +895,9 @@ ensure_cline() {
 }
 
 hermes_platform_is_supported() {
+    if [ "$TERMUX" -eq 1 ]; then
+        return 1
+    fi
     hermes_platform=$(uname -s)
     hermes_architecture=$(uname -m)
     case "$hermes_platform:$hermes_architecture" in
@@ -1027,7 +1062,11 @@ ensure_grok() {
 
 install_muse_code() {
     case "$(uname -s)" in
-        Darwin|Linux) ;;
+        Darwin|Linux)
+            if [ "$TERMUX" -eq 1 ]; then
+                fail "Muse Code is not supported on Android/Termux."
+            fi
+            ;;
         *) fail "Meta's official Muse Code installer supports macOS, Linux, and WSL only." ;;
     esac
     download_and_run "$MUSE_INSTALL_URL" bash "Muse Code"
@@ -1226,6 +1265,18 @@ uv_install_bin_directory() {
 }
 
 ensure_uv() {
+    if [ "$TERMUX" -eq 1 ]; then
+        step "Ensuring uv is installed via pkg (Termux)"
+        if [ "$dry_run" -eq 1 ]; then
+            print_command pkg install uv
+            return 0
+        fi
+        run pkg update
+        run pkg install uv
+        verify_uv
+        return 0
+    fi
+
     if [ "$dry_run" -eq 1 ]; then
         if command -v uv >/dev/null 2>&1; then
             print_command uv --version
@@ -1294,13 +1345,20 @@ validate_args() {
     if [ -n "$torch_backend" ] && [ "$voice_local" -ne 1 ]; then
         fail "--torch-backend requires --voice-local."
     fi
+    if [ "$TERMUX" -eq 1 ] && [ "$voice_local" -eq 1 ]; then
+        fail "--voice-local is not supported on Android/Termux (no local Whisper support). Use NVIDIA NIM remote transcription instead."
+    fi
+    if [ "$TERMUX" -eq 1 ] && [ -n "$torch_backend" ]; then
+        fail "--torch-backend is not supported on Android/Termux."
+    fi
 }
 
 package_spec() {
     # NVIDIA NIM voice ships in the standard install, so only the local Whisper
     # extra is selectable. Kept pointed at this repository's archive because
     # luicode is not published to PyPI under this name.
-    if [ "$voice_local" -eq 1 ]; then
+    # On Android/Termux, local Whisper is not supported.
+    if [ "$voice_local" -eq 1 ] && [ "$TERMUX" -eq 0 ]; then
         printf 'luicode[voice_local] @ %s' "$REPO_ARCHIVE_URL"
     else
         printf 'luicode @ %s' "$REPO_ARCHIVE_URL"
@@ -1310,6 +1368,22 @@ package_spec() {
 install_luicode() {
     assert_no_luicode_processes_running
     spec=$(package_spec)
+
+    if [ "$TERMUX" -eq 1 ]; then
+        # On Termux, use the system Python from pkg instead of uv-managed Python
+        if [ "$dry_run" -eq 1 ]; then
+            print_command pkg install python nodejs
+            if [ -n "$torch_backend" ]; then
+                print_command uv tool install --force --refresh-package luicode --torch-backend "$torch_backend" "$spec"
+            else
+                print_command uv tool install --force --refresh-package luicode "$spec"
+            fi
+            return 0
+        fi
+        run pkg install python nodejs
+        run uv tool install --force --refresh-package luicode "$spec"
+        return 0
+    fi
 
     if [ -n "$torch_backend" ]; then
         run uv tool install --force --refresh-package luicode --python "$PYTHON_VERSION" --torch-backend "$torch_backend" "$spec"
@@ -1434,7 +1508,7 @@ add_known_bin_directories
 if command -v cline >/dev/null 2>&1 || command -v npm >/dev/null 2>&1; then
     install_cline=1
 fi
-if ! command -v hermes >/dev/null 2>&1 && ! hermes_platform_is_supported; then
+if [ "$TERMUX" -eq 0 ] && ! command -v hermes >/dev/null 2>&1 && ! hermes_platform_is_supported; then
     install_hermes=0
 fi
 step "Checking for running luicode processes"
@@ -1492,6 +1566,15 @@ else
     if [ "$(uname -s)" = "Darwin" ]; then
         printf '\nluicode is installed and verified. Open luicode from Applications or the desktop to run it in the background.\n'
         printf 'For terminal use, start the proxy with: luicode-server\n'
+    elif [ "$TERMUX" -eq 1 ]; then
+        printf '\nluicode is installed and verified. Start the proxy with: luicode-server\n'
+        printf '\nAndroid/Termux notes:\n'
+        printf '  - Run "termux-wake-lock" to prevent Android from killing the server when backgrounded.\n'
+        printf '  - Disable battery optimization for Termux (Settings > Apps > Termux > Battery > Unrestricted).\n'
+        printf '  - For auto-start on boot, install Termux:Boot and add "luicode-server" to ~/.termux/boot/.\n'
+        printf '  - For a persistent notification, install Termux:API and use "termux-notification".\n'
+        printf '  - Open the Admin UI with: termux-open-url http://127.0.0.1:<port>\n'
+        printf '  - To access from another device on LAN, bind to 0.0.0.0 and enable Proxy Authentication.\n'
     else
         printf '\nluicode is installed and verified. Start the proxy with: luicode-server\n'
     fi
