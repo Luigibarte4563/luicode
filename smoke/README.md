@@ -66,6 +66,7 @@ Default targets do not send real bot messages or load voice backends:
 | `lmstudio` | local `/models` plus OpenAI-chat-backed Messages through proxy | running LM Studio server |
 | `llamacpp` | local `/models` plus OpenAI-chat-backed Messages through proxy | running llama-server |
 | `ollama` | local `/v1/models` plus OpenAI-chat-backed Messages through proxy | running Ollama server |
+| `termux` | Termux/Android installer detection, component availability, server startup | Termux environment (F-Droid build) |
 
 Heavy/side-effectful targets are opt-in:
 
@@ -126,6 +127,18 @@ uv run pytest smoke/product/test_client_product_live.py -n 0 -s --tb=short -k cl
 $env:LUICODE_LIVE_SMOKE = "1"
 $env:LUICODE_SMOKE_TARGETS = "messaging,config,extensibility"
 uv run pytest smoke/product -n 0 -s --tb=short
+```
+
+```powershell
+# Termux/Android smoke tests (run inside Termux)
+$env:LUICODE_LIVE_SMOKE = "1"
+$env:LUICODE_SMOKE_TARGETS = "termux"
+uv run pytest smoke/prereq/test_termux_prereq_live.py -n 0 -s --tb=short
+```
+
+```powershell
+# Print manual checklist for Termux
+python -m smoke.prereq.test_termux_prereq_live --manual-checklist
 ```
 
 NVIDIA NIM vision regression (PowerShell):

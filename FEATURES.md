@@ -197,16 +197,17 @@ Native **Codex sessions in your browser** with real-time and background support:
 - Requires delete message permission in groups
 - Same command set as Discord
 
-### Voice Notes (Optional)
+### Voice Notes
 | Backend | Install Flag | Requirements |
 |---------|--------------|--------------|
-| **NVIDIA NIM Whisper** | `--voice-nim` | `NVIDIA_NIM_API_KEY` |
+| **NVIDIA NIM Whisper** | included by default | `NVIDIA_NIM_API_KEY` |
 | **Local Whisper (CPU/CUDA)** | `--voice-local` | `uv sync --extra voice_local` |
-| **Both** | `--voice-all` | Both sets of deps |
 
 - Enable in Admin UI → Messaging → Voice
 - Select device: `cpu`, `cuda`, or `nvidia_nim`
 - Choose Whisper model (local) or NIM model (cloud)
+
+**Android/Termux:** Local Whisper (`--voice-local`) is not supported. Use NVIDIA NIM remote transcription only.
 
 ---
 
@@ -223,6 +224,8 @@ Enable coding agents to **navigate, click, fill forms, extract data** from web p
 | **API** | `BrowserToolsPort` protocol in application layer |
 | **Runtime** | `BrowserToolsClient` handles CDP sessions, DOM snapshots, staleness detection |
 
+**Not available on Android/Termux** (no embeddable Chromium in Termux).
+
 ```python
 from luicode.application.browser_tools.ports import BrowserToolsPort
 
@@ -238,18 +241,18 @@ async def my_handler(browser_tools: BrowserToolsPort):
 
 ## Supported Coding Agents (10)
 
-| Agent | Launcher | Notes |
-|-------|----------|-------|
-| **Claude Code** | `luicode-claude` | Full Messages API support |
-| **Codex** | `luicode-codex` | OpenAI Responses API |
-| **Pi** | `luicode-pi` | Anthropic-compatible |
-| **OpenCode 2** | `luicode-opencode` | Native upgrade supported |
-| **Cline** | `luicode-cline` | VS Code extension |
-| **Hermes** | `luicode-hermes` | Nous Research |
-| **DeepSeek Harness** | `luicode-dsh` | Web-based |
-| **Grok Build** | `luicode-grok` | xAI |
-| **Muse Code** | `luicode-muse` | Meta |
-| **Aider** | `luicode-aider` | Terminal-based |
+| Agent | Launcher | Notes | Android/Termux |
+|-------|----------|-------|----------------|
+| **Claude Code** | `luicode-claude` | Full Messages API support | ✅ Supported |
+| **Codex** | `luicode-codex` | OpenAI Responses API | ✅ Supported |
+| **Pi** | `luicode-pi` | Anthropic-compatible | ✅ Supported |
+| **OpenCode 2** | `luicode-opencode` | Native upgrade supported | ✅ Supported |
+| **Cline** | `luicode-cline` | VS Code extension | ✅ Supported |
+| **Hermes** | `luicode-hermes` | Nous Research | ❌ No ARM64 Linux release |
+| **DeepSeek Harness** | `luicode-dsh` | Web-based | ✅ Supported |
+| **Grok Build** | `luicode-grok` | xAI | ✅ Supported |
+| **Muse Code** | `luicode-muse` | Meta | ❌ No Android support |
+| **Aider** | `luicode-aider` | Terminal-based | ✅ Supported |
 
 ---
 
@@ -314,8 +317,7 @@ uv sync --extra browser
 # Voice (local Whisper)
 uv sync --extra voice_local
 
-# Voice (NVIDIA NIM)
-uv sync --extra voice
+# Voice (NVIDIA NIM) ships in the standard install
 ```
 
 ### Update
