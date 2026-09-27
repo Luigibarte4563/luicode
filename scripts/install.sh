@@ -19,7 +19,8 @@ RTK_RELEASE_BASE_URL="https://github.com/rtk-ai/rtk/releases/download/v$RTK_VERS
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 LUICODE_MACOS_BUNDLE_ID="com.luicode.desktop"
 LUICODE_MACOS_OWNER_FILE=".luicode-owner"
-# Include retired entry points so updates reject older LUICODE processes before replacement.
+# Include every entry point plus the retired `luicode-init` so updates reject
+# older LUICODE processes before replacement.
 LUICODE_COMMANDS="luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-update luicode-init luicode"
 
 dry_run=0
@@ -50,6 +51,14 @@ is_termux() {
     case "$(uname -o 2>/dev/null || true)" in
         Android) return 0 ;;
     esac
+    # TERMUX_VERSION is exported by Termux itself. The app data directory also
+    # covers sessions started outside the Termux shell wrapper.
+    if [ -n "${TERMUX_VERSION:-}" ]; then
+        return 0
+    fi
+    if [ -d /data/data/com.termux ]; then
+        return 0
+    fi
     return 1
 }
 
@@ -1306,6 +1315,461 @@ ensure_uv() {
     verify_uv
 }
 
+# ---------------------------------------------------------------------------
+# Android/Termux one-command installer
+# ---------------------------------------------------------------------------
+# Termux cannot use the uv tool flow used everywhere else: uv ships no managed
+# CPython build for Android, so the package is installed with the interpreter
+# from `pkg` against a checkout kept in a user-owned directory. Every path here
+# is POSIX sh, needs no root, and never writes outside $HOME.
+LUICODE_REPO_URL="https://github.com/Luigibarte4563/luicode.git"
+# Deliberately not $HOME/.luicode: that is the live config/data directory
+# (config/paths.py LUICODE_CONFIG_DIRNAME) and scripts/uninstall.sh purges it
+# with `rm -rf`, which would destroy the checkout and the user's config.
+# Guarded so an unset HOME cannot break the non-Termux flow under `set -u`;
+# detect_platform rejects an unset HOME before this value is used.
+LUICODE_SRC_DIR="${LUICODE_SRC_DIR:-${HOME:-}/.luicode-src}"
+LUICODE_MIN_PYTHON_VERSION="3.14.0"
+# Built-in Settings defaults (src/luicode/config/settings.py). Used only to
+# report the web URL when the effective settings cannot be loaded.
+LUICODE_DEFAULT_PORT="8082"
+PATH_MARKER_BEGIN="# >>> LUICode PATH >>>"
+PATH_MARKER_END="# <<< LUICode PATH <<<"
+# luicode-run commands. `luicode` and `luicode-init` are also listed in
+# LUICODE_COMMANDS above so stale copies from older releases are replaced.
+LUICODE_TERMUX_COMMANDS="luicode luicode-server"
+PYTHON=""
+
+print_termux_banner() {
+    cat <<'BANNER'
+========================================
+      LUICode Installer for Android
+========================================
+BANNER
+}
+
+detect_platform() {
+    print_termux_banner
+    if [ -n "${TERMUX_VERSION:-}" ]; then
+        printf 'Detected Termux %s on Android.\n' "$TERMUX_VERSION"
+    else
+        printf 'Detected Termux on Android (TERMUX_VERSION is not set).\n'
+    fi
+    if [ "$(id -u 2>/dev/null || echo 0)" = "0" ]; then
+        fail "This installer must not run as root. Run it as your normal Termux user without sudo."
+    fi
+    [ -n "${HOME:-}" ] ||
+        fail "HOME is not set. LUICode must be installed in your home directory."
+    printf 'Home directory: %s\n' "$HOME"
+    printf 'Source directory: %s\n\n' "$LUICODE_SRC_DIR"
+}
+
+run_pkg() {
+    # Like run, but reports a Termux-specific remedy when pkg fails.
+    pkg_hint=$1
+    shift
+    print_command "$@"
+    if [ "$dry_run" -eq 1 ]; then
+        return 0
+    fi
+    if "$@"; then
+        return 0
+    else
+        pkg_status=$?
+    fi
+    fail "\"$*\" failed with exit code $pkg_status. $pkg_hint"
+}
+
+install_termux_dependencies() {
+    step "Updating Termux packages"
+    run_pkg \
+        'Refresh the package lists with "pkg update", check your network, then rerun this installer.' \
+        pkg update -y
+    if [ "$dry_run" -eq 1 ]; then
+        run_pkg 'Refresh the package lists with "pkg update", then rerun this installer.' \
+            pkg upgrade -y
+    elif print_command pkg upgrade -y && pkg upgrade -y; then
+        printf 'Termux packages upgraded.\n'
+    else
+        # A failing upgrade must not block installing LUICode itself.
+        printf 'warning: "pkg upgrade -y" failed; continuing with the installed packages.\n' >&2
+    fi
+
+    step "Ensuring python, git, and curl are installed"
+    if [ "$dry_run" -eq 1 ]; then
+        run_pkg 'Refresh the package lists with "pkg update", then rerun this installer.' \
+            pkg install -y python git curl
+        return 0
+    fi
+
+    missing_packages=""
+    for package_name in python git curl; do
+        if ! command -v "$package_name" >/dev/null 2>&1; then
+            missing_packages="$missing_packages $package_name"
+        fi
+    done
+    if [ -n "$missing_packages" ]; then
+        printf 'Missing Termux packages:%s\n' "$missing_packages"
+        run_pkg \
+            "Termux could not install$missing_packages. Refresh the package lists with \"pkg update\", check your network, then rerun this installer." \
+            pkg install -y $missing_packages
+    else
+        printf 'python, git, and curl are already installed.\n'
+    fi
+}
+
+termux_python_version() {
+    "$PYTHON" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null
+}
+
+detect_python() {
+    step "Detecting Python"
+    if [ "$dry_run" -eq 1 ]; then
+        return 0
+    fi
+
+    for python_candidate in python python3; do
+        if command -v "$python_candidate" >/dev/null 2>&1; then
+            PYTHON=$python_candidate
+            break
+        fi
+    done
+    [ -n "$PYTHON" ] ||
+        fail "Python was not found. Run \"pkg install python\", then rerun this installer."
+
+    printf 'Using interpreter: %s\n' "$PYTHON"
+    "$PYTHON" --version 2>&1 ||
+        fail "\"$PYTHON --version\" failed. Reinstall Python with \"pkg reinstall python\", then rerun this installer."
+
+    python_version=$(termux_python_version) ||
+        fail "Could not read the version of $PYTHON. Reinstall it with \"pkg reinstall python\", then rerun this installer."
+    stable_version_is_supported "$python_version" "$LUICODE_MIN_PYTHON_VERSION" ||
+        fail "LUICode requires Python $LUICODE_MIN_PYTHON_VERSION or newer; $PYTHON is $python_version. Run \"pkg upgrade python\", then rerun this installer."
+    printf 'Python %s satisfies the >=%s requirement.\n' "$python_version" "$LUICODE_MIN_PYTHON_VERSION"
+}
+
+upgrade_pip() {
+    step "Ensuring pip is available"
+    if [ "$dry_run" -eq 1 ]; then
+        printf 'Would upgrade pip with the detected interpreter.\n'
+        return 0
+    fi
+
+    "$PYTHON" -m pip --version >/dev/null 2>&1 ||
+        fail "pip is not available for $PYTHON. Run \"pkg reinstall python\", then rerun this installer."
+
+    if "$PYTHON" -m pip install --upgrade pip; then
+        printf 'pip is up to date.\n'
+    else
+        # Termux marks its Python package as externally managed, so a global
+        # pip upgrade can be refused. The bundled pip still installs packages.
+        printf 'warning: could not upgrade pip; continuing with the pip bundled with %s.\n' "$PYTHON" >&2
+    fi
+}
+
+sync_luicode_source() {
+    step "Fetching the luicode source into $LUICODE_SRC_DIR"
+    if [ "$dry_run" -eq 1 ]; then
+        if [ -d "$LUICODE_SRC_DIR/.git" ]; then
+            print_command git -C "$LUICODE_SRC_DIR" pull --ff-only
+        else
+            print_command git clone "$LUICODE_REPO_URL" "$LUICODE_SRC_DIR"
+        fi
+        return 0
+    fi
+
+    if [ -d "$LUICODE_SRC_DIR/.git" ]; then
+        # Untracked build artifacts (egg-info) are ignored so an editable
+        # install does not permanently block updates. --ff-only never discards
+        # tracked work either, so nothing needs to be stashed to stay safe.
+        if [ -n "$(git -C "$LUICODE_SRC_DIR" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+            printf 'warning: %s has uncommitted changes; skipping the update so nothing is discarded.\n' "$LUICODE_SRC_DIR" >&2
+            printf 'Commit or stash those changes, then rerun this installer to update.\n' >&2
+            return 0
+        fi
+        run git -C "$LUICODE_SRC_DIR" pull --ff-only
+        return 0
+    fi
+
+    if [ -e "$LUICODE_SRC_DIR" ]; then
+        fail "$LUICODE_SRC_DIR already exists but is not a git checkout. Move it aside, then rerun this installer."
+    fi
+
+    run git clone "$LUICODE_REPO_URL" "$LUICODE_SRC_DIR"
+}
+
+install_luicode_from_source() {
+    step "Installing the luicode package"
+    if [ "$dry_run" -eq 1 ]; then
+        if [ -f "$LUICODE_SRC_DIR/pyproject.toml" ]; then
+            print_command "$PYTHON" -m pip install -e .
+        elif [ -f "$LUICODE_SRC_DIR/requirements.txt" ]; then
+            print_command "$PYTHON" -m pip install -r "$LUICODE_SRC_DIR/requirements.txt"
+        fi
+        return 0
+    fi
+
+    assert_no_luicode_processes_running
+
+    if [ -f "$LUICODE_SRC_DIR/pyproject.toml" ]; then
+        source_directory=$PWD
+        cd "$LUICODE_SRC_DIR" || fail "Could not enter $LUICODE_SRC_DIR."
+        run "$PYTHON" -m pip install -e .
+        cd "$source_directory" || fail "Could not return to $source_directory."
+    elif [ -f "$LUICODE_SRC_DIR/requirements.txt" ]; then
+        run "$PYTHON" -m pip install -r "$LUICODE_SRC_DIR/requirements.txt"
+    else
+        fail "Neither pyproject.toml nor requirements.txt exists in $LUICODE_SRC_DIR. Move the directory aside, then rerun this installer."
+    fi
+}
+
+resolve_luicode_bin_dir() {
+    LUICODE_BIN_DIR=""
+    if [ "$dry_run" -eq 1 ]; then
+        if [ -n "${HOME:-}" ]; then
+            LUICODE_BIN_DIR="$HOME/.local/bin"
+        fi
+        return 0
+    fi
+
+    scripts_directory=$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_path("scripts"))' 2>/dev/null || true)
+    user_base=$("$PYTHON" -m site --user-base 2>/dev/null || true)
+
+    # Ordered candidates, most specific first.
+    set --
+    if [ -n "${XDG_BIN_HOME:-}" ]; then
+        set -- "$@" "$XDG_BIN_HOME"
+    fi
+    if [ -n "$scripts_directory" ]; then
+        set -- "$@" "$scripts_directory"
+    fi
+    if [ -n "$user_base" ]; then
+        set -- "$@" "$user_base/bin"
+    fi
+    if [ -n "${HOME:-}" ]; then
+        set -- "$@" "$HOME/.local/bin"
+    fi
+
+    # Prefer the directory pip actually wrote the entry points to.
+    for candidate_directory in "$@"; do
+        if [ -x "$candidate_directory/luicode-server" ]; then
+            LUICODE_BIN_DIR=$candidate_directory
+            return 0
+        fi
+    done
+    for candidate_directory in "$@"; do
+        if [ -d "$candidate_directory" ]; then
+            LUICODE_BIN_DIR=$candidate_directory
+            return 0
+        fi
+    done
+
+    fail "Could not find a directory for the luicode entry points. Looked in: $*"
+}
+
+termux_rc_file() {
+    case "${SHELL:-}" in
+        *zsh) termux_rc="$HOME/.zshrc" ;;
+        *bash) termux_rc="$HOME/.bashrc" ;;
+        *) termux_rc="$HOME/.profile" ;;
+    esac
+    if [ ! -e "$termux_rc" ]; then
+        # Never create a stray rc file when the user's real one already exists.
+        for termux_alternative in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
+            if [ -e "$termux_alternative" ]; then
+                termux_rc=$termux_alternative
+                break
+            fi
+        done
+    fi
+    printf '%s\n' "$termux_rc"
+}
+
+termux_rc_file_is_configured() {
+    [ -e "$1" ] || return 1
+    grep -q -F "$PATH_MARKER_BEGIN" "$1" 2>/dev/null || return 1
+    grep -q -F "export PATH=\"$LUICODE_BIN_DIR:\$PATH\"" "$1" 2>/dev/null || return 1
+    return 0
+}
+
+termux_write_rc_block() {
+    rc_target=$1
+    rc_temporary=$(mktemp "$rc_target.luicode-XXXXXX" 2>/dev/null) ||
+        fail "Could not create a temporary file next to $rc_target."
+
+    # Drop any previous managed block, keeping every other line untouched.
+    if [ -e "$rc_target" ]; then
+        awk -v begin="$PATH_MARKER_BEGIN" -v end="$PATH_MARKER_END" '
+            $0 == begin { skipping = 1; next }
+            skipping && $0 == end { skipping = 0; next }
+            skipping { next }
+            { print }
+        ' "$rc_target" > "$rc_temporary" ||
+            fail "Could not rewrite $rc_target."
+    else
+        : > "$rc_temporary"
+    fi
+
+    # The separating blank line lives inside the block so repeated runs replace
+    # it instead of stacking newlines.
+    {
+        cat "$rc_temporary"
+        printf '\n%s\n' "$PATH_MARKER_BEGIN"
+        printf '# Managed by the luicode installer; changes inside this block are overwritten.\n'
+        printf 'export PATH="%s:$PATH"\n' "$LUICODE_BIN_DIR"
+        printf '%s\n' "$PATH_MARKER_END"
+    } >> "$rc_temporary" ||
+        fail "Could not write the PATH block to $rc_target."
+
+    cat "$rc_temporary" > "$rc_target" ||
+        fail "Could not update $rc_target."
+    rm -f "$rc_temporary"
+}
+
+configure_path() {
+    step "Configuring PATH"
+    resolve_luicode_bin_dir
+    [ -n "$LUICODE_BIN_DIR" ] ||
+        fail "Could not determine where the luicode entry points are installed."
+
+    # Make the commands usable in this session so verification below is real.
+    add_path_entry "$LUICODE_BIN_DIR"
+    prioritize_path_entry "$LUICODE_BIN_DIR"
+    printf 'Entry point directory: %s\n' "$LUICODE_BIN_DIR"
+
+    luicode_rc_file=$(termux_rc_file)
+    [ -n "$luicode_rc_file" ] ||
+        fail "Could not determine which shell rc file to update."
+
+    if [ "$dry_run" -eq 1 ]; then
+        printf 'Would export %s from %s.\n' "$LUICODE_BIN_DIR" "$luicode_rc_file"
+        return 0
+    fi
+
+    if termux_rc_file_is_configured "$luicode_rc_file"; then
+        printf '%s already exports %s; leaving it unchanged.\n' "$luicode_rc_file" "$LUICODE_BIN_DIR"
+        return 0
+    fi
+
+    termux_write_rc_block "$luicode_rc_file"
+    printf 'Added %s to PATH in %s.\n' "$LUICODE_BIN_DIR" "$luicode_rc_file"
+}
+
+verify_installation() {
+    step "Verifying the installation"
+    if [ "$dry_run" -eq 1 ]; then
+        for entry_point in $LUICODE_TERMUX_COMMANDS; do
+            print_command "$entry_point" --version
+        done
+        return 0
+    fi
+
+    hash -r 2>/dev/null || true
+    for entry_point in $LUICODE_TERMUX_COMMANDS; do
+        entry_point_path=$(command -v "$entry_point" 2>/dev/null) ||
+            fail "$entry_point is installed but is not on PATH. Add $LUICODE_BIN_DIR to PATH in $luicode_rc_file, then open a new Termux session."
+        printf 'Found %s at %s\n' "$entry_point" "$entry_point_path"
+        # --version is the supported non-starting check. `luicode-server --help`
+        # is not handled by luicode.cli.entrypoints.serve and would start the
+        # server, blocking the installer.
+        entry_point_output=$("$entry_point_path" --version 2>&1) ||
+            fail "$entry_point is installed but failed to run: $entry_point_output"
+        printf 'Verified %s: %s\n' "$entry_point" "$entry_point_output"
+    done
+}
+
+luicode_web_urls() {
+    # Read the effective settings so the reported URL matches what the server
+    # will actually bind, including a PORT override in ~/.luicode/.env.
+    url_output=$(cd "$LUICODE_SRC_DIR" && "$PYTHON" -c '
+from luicode.config.loader import get_settings
+from luicode.config.server_urls import local_admin_url, local_proxy_root_url
+
+settings = get_settings()
+print(local_proxy_root_url(settings))
+print(local_admin_url(settings))
+' 2>&1) || return 1
+
+    printf '%s\n' "$url_output" | sed -n '1p;2p'
+}
+
+print_success() {
+    web_root_url=""
+    web_admin_url=""
+    if [ "$dry_run" -eq 0 ]; then
+        if web_urls=$(luicode_web_urls); then
+            web_root_url=$(printf '%s\n' "$web_urls" | sed -n '1p')
+            web_admin_url=$(printf '%s\n' "$web_urls" | sed -n '2p')
+        else
+            # Settings defaults: HOST 0.0.0.0, normalized to loopback for
+            # same-device browsing.
+            web_root_url="http://127.0.0.1:$LUICODE_DEFAULT_PORT"
+            web_admin_url="$web_root_url/admin"
+        fi
+    fi
+
+    cat <<'SUMMARY'
+========================================
+       LUICode Installation Complete
+========================================
+SUMMARY
+    printf '\n'
+    printf 'Termux detected\n'
+    printf 'Python installed\n'
+    printf 'Git installed\n'
+    printf 'LUICode installed in %s\n' "$LUICODE_SRC_DIR"
+    printf 'CLI commands configured in %s\n' "$LUICODE_BIN_DIR"
+    printf 'Installation verified\n'
+
+    if [ "$dry_run" -eq 1 ]; then
+        printf '\nDry run complete. No changes were made.\n'
+        return 0
+    fi
+
+    printf '\nCommands:\n\n'
+    for entry_point in $LUICODE_TERMUX_COMMANDS; do
+        printf '  %s\n' "$entry_point"
+    done
+    printf '\nWeb interface:\n\n'
+    printf '  %s\n' "$web_root_url"
+    printf '  Admin UI: %s\n' "$web_admin_url"
+    printf '\nFor long-running servers:\n\n'
+    printf '  termux-wake-lock\n'
+    printf '\nEnjoy LUICode!\n'
+}
+
+run_termux_installer() {
+    step "Checking installation prerequisites"
+    # awk, grep, mktemp, and sed ship with Termux's bootstrap termux-tools
+    # package, so they are safe to require before any pkg call. git and python
+    # are not, so they are ensured by install_termux_dependencies instead.
+    require_command awk
+    require_command grep
+    require_command sed
+    require_command mktemp
+
+    install_termux_dependencies
+    command -v git >/dev/null 2>&1 ||
+        fail "git is still unavailable after \"pkg install git\". Check your Termux package sources with \"pkg update\", then rerun this installer."
+    detect_python
+    upgrade_pip
+    sync_luicode_source
+    install_luicode_from_source
+    configure_path
+    verify_installation
+
+    step "Reporting Android notes"
+    cat <<'NOTES'
+The following are NOT supported on Android:
+  - Local Whisper voice transcription (use NVIDIA NIM remote instead)
+  - Hermes Agent (no ARM64 Linux release)
+  - Muse Code (no Android/Termux support)
+  - Browser automation (no embeddable Chromium in Termux)
+NOTES
+
+    print_success
+}
+
 parse_args() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -1502,6 +1966,15 @@ PLIST
 
 parse_args "$@"
 validate_args
+
+# Android/Termux runs the self-contained pip flow above. Every other platform
+# continues unchanged into the uv tool flow below.
+if [ "$TERMUX" -eq 1 ]; then
+    detect_platform
+    run_termux_installer
+    exit 0
+fi
+
 # Preserve the user's winning command before adding installer search paths.
 original_opencode_path=$(command -v opencode || true)
 add_known_bin_directories

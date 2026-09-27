@@ -6,22 +6,58 @@ This guide covers installing and running luicode on Android using **Termux** (F-
 
 - Android 10 or later
 - **Termux** installed from [F-Droid](https://f-droid.org/packages/com.termux/) (not the abandoned Play Store build)
+- Python 3.14 or newer (the installer upgrades it for you with `pkg upgrade python`)
 - Optional: **Termux:API** and **Termux:Boot** add-ons from F-Droid for background persistence and notifications
 - No root required
 
 ## Installation
 
-1. Open Termux and run the standard installer:
+Open Termux and run one command:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh | sh
 ```
 
-The installer will detect Termux automatically and:
-- Install Python, Node.js, and uv via `pkg install`
-- Skip systemd/launchctl/tray-icon logic (not applicable on Android)
-- Skip unsupported components (Hermes Agent, Muse Code, local Whisper, browser automation)
-- Install luicode and selected coding agents (Claude Code, Codex, OpenCode, etc.)
+The installer detects Termux automatically and:
+
+1. Prints a banner with the detected Termux version.
+2. Refuses to run as root.
+3. Runs `pkg update -y` and `pkg upgrade -y`, then installs only the packages
+   you are actually missing (`python`, `git`, `curl`).
+4. Detects `python` or `python3` and confirms it satisfies the 3.14 minimum.
+5. Upgrades pip, tolerating Termux builds that refuse a global pip upgrade.
+6. Clones the repository into `~/.luicode-src` (or `git pull --ff-only` if it
+   is already there). If the checkout has uncommitted changes it warns and
+   skips the update rather than discarding your work.
+7. Installs the package with `pip install -e .`.
+8. Adds the console-script directory to `PATH` from `~/.bashrc` or `~/.zshrc`,
+   inside one managed block:
+
+   ```sh
+   # >>> LUICode PATH >>>
+   # Managed by the luicode installer; changes inside this block are overwritten.
+   export PATH="/data/data/com.termux/files/usr/bin:$PATH"
+   # <<< LUICode PATH <<<
+   ```
+
+9. Verifies that `luicode` and `luicode-server` resolve on `PATH` and run
+   `--version`, then prints the web interface URL.
+
+`~/.luicode-src` is deliberately **not** `~/.luicode`: `~/.luicode` is your live
+configuration and data directory (`.env`, `code.db`, `logs/`, `auth/`), and
+`scripts/uninstall.sh` deletes it. Keeping the checkout separate means
+uninstalling can never destroy your source or your settings.
+
+### After installing
+
+Open a **new** Termux session so the updated `PATH` is loaded, then:
+
+```sh
+luicode          # alias for luicode-server
+luicode-server   # start the gateway
+```
+
+Add `--dry-run` to see every step without changing anything.
 
 ## Running the Server
 
@@ -31,7 +67,10 @@ The installer will detect Termux automatically and:
 luicode-server
 ```
 
-The server will start and print the Admin UI URL (e.g., `http://127.0.0.1:8080`). Open this in Chrome/Firefox on the same device.
+The server prints the Admin UI URL. With the default settings that is
+<http://127.0.0.1:8082/admin> (built-in defaults: `HOST=0.0.0.0`, `PORT=8082`).
+Set `PORT` in `~/.luicode/.env` to change it, and the installer will report the
+resulting URL on the next run.
 
 ### Keeping the Server Alive (Background)
 
@@ -42,7 +81,8 @@ Android aggressively kills background processes. To keep `luicode-server` runnin
    termux-wake-lock
    luicode-server
    ```
-   Release with `termux-wake-unlock` when done.
+   Release with `termux-wake-unlock` when done. The installer never runs
+   `termux-wake-lock` for you; it only prints this as an optional tip.
 
 2. **Disable battery optimization for Termux**:
    - Settings → Apps → Termux → Battery → **Unrestricted**
@@ -65,7 +105,7 @@ Android aggressively kills background processes. To keep `luicode-server` runnin
      ```sh
      #!/bin/sh
      termux-wake-lock
-     termux-notification --id luicode --title "luicode Server" --content "Running on port 8080" --ongoing
+     termux-notification --id luicode --title "luicode Server" --content "Running on port 8082" --ongoing
      luicode-server
      termux-notification-remove luicode
      termux-wake-unlock
@@ -75,9 +115,10 @@ Android aggressively kills background processes. To keep `luicode-server` runnin
 
 ### From the same device (localhost)
 
-The Admin UI is available at `http://127.0.0.1:<port>`. Open it directly in your browser, or use:
+The Admin UI is available at `http://127.0.0.1:8082/admin`. Open it directly in
+your browser, or use:
 ```sh
-termux-open-url http://127.0.0.1:8080
+termux-open-url http://127.0.0.1:8082/admin
 ```
 
 ### From another device on the same LAN
@@ -95,9 +136,12 @@ To configure luicode from a laptop while the phone runs the server:
    ```
    Then configure clients to send `Authorization: Bearer your-secure-random-token`.
 
-3. Find your phone's LAN IP (e.g., `192.168.1.42`) and access `http://192.168.1.42:8080` from the other device.
+3. Find your phone's LAN IP (e.g., `192.168.1.42`) and access `http://192.168.1.42:8082` from the other device.
 
 ## Supported Coding Agents on Android
+
+The one-command Termux install covers the gateway. Coding agents are installed
+separately, and each has its own Android support status:
 
 | Agent | Status | Notes |
 |-------|--------|-------|
@@ -124,22 +168,40 @@ To configure luicode from a laptop while the phone runs the server:
 
 These work as long as the Python process stays alive. Apply the same persistence measures as the server (wake lock, battery exemption, Termux:Boot).
 
-## Upgrading
+## Updating
 
-Re-run the installer:
+Re-run the same one-line installer:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh | sh
 ```
 
-Or use `luicode-update` once installed.
+It runs `git pull --ff-only` and re-installs the package. Reruns are safe: the
+`PATH` block is replaced rather than duplicated, packages that are already
+present are not reinstalled, and your configuration and data are never touched.
 
 ## Uninstalling
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/uninstall.sh | sh
+# Remove the Python package
+pip uninstall luicode
+
+# Optionally remove the source checkout
+rm -rf ~/.luicode-src
 ```
 
-This removes the luicode uv tool and `~/.luicode/` config directory. It does not remove Termux packages (Python, Node.js, uv) or coding agent CLIs.
+Then remove the managed block from `~/.bashrc` or `~/.zshrc`:
+
+```sh
+# >>> LUICode PATH >>>
+...
+# <<< LUICode PATH <<<
+```
+
+> **Note:** `scripts/uninstall.sh` targets the uv tool install used on
+> Linux/macOS. It does not remove a pip install, so on Termux use
+> `pip uninstall luicode` as shown above. Neither path deletes `~/.luicode`;
+> remove that yourself if you want your configuration and data gone.
 
 ## Troubleshooting
 
@@ -148,13 +210,26 @@ This removes the luicode uv tool and `~/.luicode/` config directory. It does not
 - Ensure **wake lock is held** (`termux-wake-lock`)
 - Check that Termux:Boot script is working if using auto-start
 
-### `luicode-server` not found after install
-- Run `uv tool update-shell` and restart Termux, or
-- Add `~/.local/bin` to PATH in `~/.bashrc` / `~/.zshrc`
+### `luicode-server: command not found` after install
+- Open a **new** Termux session so the updated `PATH` is loaded
+- Confirm the managed block exists: `grep -A2 'LUICode PATH' ~/.bashrc`
+- Confirm the entry points exist: `ls "$(python -m site --user-base)/bin"` or
+  `$PREFIX/bin`
+- Re-run the installer; it re-verifies both commands and reports the real error
+
+### `luicode: command not found`
+- `luicode` is an alias for `luicode-server`; both come from the same install
+- Re-run the installer and read the verification step
 
 ### Python version issues
-- Termux's `pkg install python` provides Python 3.11+ (3.14 when available)
-- The installer uses the system Python on Termux, not a uv-managed Python
+- LUICode requires Python 3.14 or newer
+- The installer refuses to continue on an older interpreter and tells you to run
+  `pkg upgrade python`
+- If pip is missing, run `pkg reinstall python`
+
+### Installer says the repository has uncommitted changes
+- Commit or stash them, then rerun. The installer deliberately skips the update
+  instead of discarding your edits.
 
 ### Network access from LAN not working
 - Verify `LUICODE_HOST=0.0.0.0` is set
@@ -165,9 +240,13 @@ This removes the luicode uv tool and `~/.luicode/` config directory. It does not
 ## Acceptance Criteria Checklist
 
 - [ ] Fresh Termux install → `curl ... | sh` completes without error
-- [ ] No systemd/launchctl/tray assumptions in output
+- [ ] Source checkout lives in `~/.luicode-src`, not `~/.luicode`
+- [ ] `command -v luicode` and `command -v luicode-server` both resolve in a new session
+- [ ] `luicode --version` and `luicode-server --version` both succeed
+- [ ] `~/.bashrc` (or `~/.zshrc`) has exactly one `# >>> LUICode PATH >>>` block
 - [ ] `luicode-server` starts and prints Admin UI URL
-- [ ] Admin UI reachable at `http://127.0.0.1:<port>` from device browser
+- [ ] Admin UI reachable at `http://127.0.0.1:8082/admin` from device browser
+- [ ] Rerunning the installer pulls instead of cloning and adds no duplicate PATH block
 - [ ] `luicode-claude` and `luicode-codex` connect and complete a round-trip
 - [ ] Server survives 10+ minutes screen-off with wake-lock + battery exemption
 - [ ] Attempting `--voice-local` prints clear "not supported on Android" message
