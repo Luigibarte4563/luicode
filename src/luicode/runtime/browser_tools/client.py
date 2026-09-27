@@ -133,7 +133,9 @@ READ_STATE_JS = """
 })()
 """
 
-MARKER_JS = "(() => { const state=" + READ_STATE_JS + "; return state?.marker ?? null; })()"
+MARKER_JS = (
+    "(() => { const state=" + READ_STATE_JS + "; return state?.marker ?? null; })()"
+)
 
 
 class StalePage(ValueError):
@@ -176,16 +178,29 @@ class BrowserToolsClient:
         ensure_daemon()
 
         # Create a new background target
-        self._target_id = cdp("Target.createTarget", url="about:blank", background=True)["targetId"]
-        self._session_id = cdp("Target.attachToTarget", targetId=self._target_id, flatten=True)["sessionId"]
+        self._target_id = cdp(
+            "Target.createTarget", url="about:blank", background=True
+        )["targetId"]
+        self._session_id = cdp(
+            "Target.attachToTarget", targetId=self._target_id, flatten=True
+        )["sessionId"]
 
         # Set viewport
-        cdp("Emulation.setDeviceMetricsOverride",
+        cdp(
+            "Emulation.setDeviceMetricsOverride",
             session_id=self._session_id,
-            width=1120, height=780, deviceScaleFactor=1, mobile=False)
+            width=1120,
+            height=780,
+            deviceScaleFactor=1,
+            mobile=False,
+        )
 
         # Keep rAF/menus rendering in background tab without activating user's Chrome tab
-        cdp("Emulation.setFocusEmulationEnabled", session_id=self._session_id, enabled=True)
+        cdp(
+            "Emulation.setFocusEmulationEnabled",
+            session_id=self._session_id,
+            enabled=True,
+        )
 
         # Navigate to initial URL
         if self._url != "about:blank":
@@ -201,7 +216,9 @@ class BrowserToolsClient:
 
     def _evaluate(self, expression: str) -> Any:
         """Evaluate JavaScript in the browser context."""
-        response = self._call_cdp("Runtime.evaluate", expression=expression, returnByValue=True)
+        response = self._call_cdp(
+            "Runtime.evaluate", expression=expression, returnByValue=True
+        )
         if response.get("exceptionDetails"):
             raise StalePage("Document changed during evaluation")
         return response.get("result", {}).get("value")
@@ -270,7 +287,9 @@ class BrowserToolsClient:
         # Observe with retries for page settling
         for attempt in range(10):
             try:
-                info = await self._browser_operation({"operation": "observe", "screenshot": screenshot})
+                info = await self._browser_operation(
+                    {"operation": "observe", "screenshot": screenshot}
+                )
                 self._page = info
                 return info
             except StalePage:
@@ -279,7 +298,9 @@ class BrowserToolsClient:
                 await asyncio.sleep(0.02)
         raise StalePage("Page did not settle")
 
-    def _fresh(self, page: dict[str, Any], action: dict[str, Any] | None = None) -> bool:
+    def _fresh(
+        self, page: dict[str, Any], action: dict[str, Any] | None = None
+    ) -> bool:
         """Check if page is still fresh (not stale)."""
         if action is not None and action.get("kind") in {"click", "select"}:
             node = action.get("node")
@@ -304,8 +325,13 @@ class BrowserToolsClient:
         def evaluate(expression: str) -> Any:
             result = call("Runtime.evaluate", expression=expression, returnByValue=True)
             if result.get("exceptionDetails"):
-                if operation == "act" and request.get("action", {}).get("kind") == "select":
-                    raise RuntimeError("Dropdown execution was interrupted; inspect before retrying.")
+                if (
+                    operation == "act"
+                    and request.get("action", {}).get("kind") == "select"
+                ):
+                    raise RuntimeError(
+                        "Dropdown execution was interrupted; inspect before retrying."
+                    )
                 raise StalePage("Document changed during evaluation")
             return result.get("result", {}).get("value")
 
@@ -313,8 +339,14 @@ class BrowserToolsClient:
             action = request["action"]
             kind = action.get("kind")
             if kind == "scroll":
-                call("Input.dispatchMouseEvent",
-                     type="mouseWheel", x=550, y=650, deltaX=0, deltaY=action.get("delta", 0))
+                call(
+                    "Input.dispatchMouseEvent",
+                    type="mouseWheel",
+                    x=550,
+                    y=650,
+                    deltaX=0,
+                    deltaY=action.get("delta", 0),
+                )
             elif kind != "wait":
                 if not isinstance(action.get("node"), int):
                     raise ValueError("Invalid observed node")
@@ -341,21 +373,41 @@ class BrowserToolsClient:
                 """)
                 if target is None:
                     if kind == "select":
-                        raise RuntimeError("Dropdown execution was not confirmed; inspect before retrying.")
+                        raise RuntimeError(
+                            "Dropdown execution was not confirmed; inspect before retrying."
+                        )
                     raise StalePage("Target changed or is covered. Observe again.")
                 if kind != "select":
                     x, y = target["x"], target["y"]
                     for event in ("mousePressed", "mouseReleased"):
-                        call("Input.dispatchMouseEvent",
-                             type=event, x=x, y=y, button="left", clickCount=1)
+                        call(
+                            "Input.dispatchMouseEvent",
+                            type=event,
+                            x=x,
+                            y=y,
+                            button="left",
+                            clickCount=1,
+                        )
                     if kind == "fill":
                         text = request.get("text", "")
                         import sys
+
                         modifiers = 4 if sys.platform == "darwin" else 2
-                        call("Input.dispatchKeyEvent",
-                             type="keyDown", key="a", code="KeyA", modifiers=modifiers, commands=["selectAll"])
-                        call("Input.dispatchKeyEvent",
-                             type="keyUp", key="a", code="KeyA", modifiers=modifiers)
+                        call(
+                            "Input.dispatchKeyEvent",
+                            type="keyDown",
+                            key="a",
+                            code="KeyA",
+                            modifiers=modifiers,
+                            commands=["selectAll"],
+                        )
+                        call(
+                            "Input.dispatchKeyEvent",
+                            type="keyUp",
+                            key="a",
+                            code="KeyA",
+                            modifiers=modifiers,
+                        )
                         call("Input.insertText", text=text)
             return {"executed": action.get("id")}
 
@@ -365,10 +417,14 @@ class BrowserToolsClient:
             raise StalePage("Document is navigating")
         info["fingerprint"] = self._fingerprint(info)
         if request.get("screenshot", True):
-            info["screenshot"] = call("Page.captureScreenshot", format="jpeg", quality=72)["data"]
+            info["screenshot"] = call(
+                "Page.captureScreenshot", format="jpeg", quality=72
+            )["data"]
         return info
 
-    async def act(self, action: dict[str, Any], page: dict[str, Any], text: str | None = None) -> dict[str, Any]:
+    async def act(
+        self, action: dict[str, Any], page: dict[str, Any], text: str | None = None
+    ) -> dict[str, Any]:
         """Execute an action on the page."""
         if not self._fresh(page, action):
             raise StalePage("Page changed since this decision. Observe again.")
@@ -376,11 +432,13 @@ class BrowserToolsClient:
         if action.get("kind") == "wait":
             await asyncio.sleep(0.1)
 
-        result = await self._browser_operation({
-            "operation": "act",
-            "action": action,
-            "text": text,
-        })
+        result = await self._browser_operation(
+            {
+                "operation": "act",
+                "action": action,
+                "text": text,
+            }
+        )
 
         self._after_input_action = action if action.get("kind") != "wait" else None
         return result
@@ -389,7 +447,9 @@ class BrowserToolsClient:
 
     async def click(self, node_id: int, page: dict[str, Any]) -> BrowserActionResult:
         """Click an element by node ID."""
-        action = next((a for a in page.get("actions", []) if a.get("node") == node_id), None)
+        action = next(
+            (a for a in page.get("actions", []) if a.get("node") == node_id), None
+        )
         if not action:
             return BrowserActionResult(
                 action="click",
@@ -427,9 +487,13 @@ class BrowserToolsClient:
                 message=f"Click failed: {e}",
             )
 
-    async def fill(self, node_id: int, text: str, page: dict[str, Any]) -> BrowserActionResult:
+    async def fill(
+        self, node_id: int, text: str, page: dict[str, Any]
+    ) -> BrowserActionResult:
         """Fill text into an input field by node ID."""
-        action = next((a for a in page.get("actions", []) if a.get("node") == node_id), None)
+        action = next(
+            (a for a in page.get("actions", []) if a.get("node") == node_id), None
+        )
         if not action:
             return BrowserActionResult(
                 action="fill",
@@ -467,9 +531,13 @@ class BrowserToolsClient:
                 message=f"Fill failed: {e}",
             )
 
-    async def select(self, node_id: int, value: str, page: dict[str, Any]) -> BrowserActionResult:
+    async def select(
+        self, node_id: int, value: str, page: dict[str, Any]
+    ) -> BrowserActionResult:
         """Select an option from a dropdown by node ID."""
-        action = next((a for a in page.get("actions", []) if a.get("node") == node_id), None)
+        action = next(
+            (a for a in page.get("actions", []) if a.get("node") == node_id), None
+        )
         if not action:
             return BrowserActionResult(
                 action="select",
@@ -528,7 +596,9 @@ class BrowserToolsClient:
                 message=f"Scroll failed: {e}",
             )
 
-    async def wait(self, page: dict[str, Any], timeout: float = 2.0) -> BrowserActionResult:
+    async def wait(
+        self, page: dict[str, Any], timeout: float = 2.0
+    ) -> BrowserActionResult:
         """Wait for page to settle."""
         action = {"kind": "wait"}
         try:
@@ -629,7 +699,9 @@ async def run_browser_task(
     async with BrowserToolsClient(url, headless=headless) as client:
         page = await client.observe(screenshot=bool(screenshot_path))
         if screenshot_path and page.get("screenshot"):
-            (screenshot_path / "000000.jpg").write_bytes(base64.b64decode(page["screenshot"]))
+            (screenshot_path / "000000.jpg").write_bytes(
+                base64.b64decode(page["screenshot"])
+            )
 
         for _i, step in enumerate(steps):
             action = step.get("action")
@@ -639,29 +711,35 @@ async def run_browser_task(
             if action == "navigate":
                 await client.navigate(step.get("url", ""))
                 page = await client.observe(screenshot=bool(screenshot_path))
-                results.append(BrowserActionResult(
-                    action="navigate",
-                    target=step.get("url", ""),
-                    success=True,
-                    message=f"Navigated to {step.get('url', '')}",
-                ))
+                results.append(
+                    BrowserActionResult(
+                        action="navigate",
+                        target=step.get("url", ""),
+                        success=True,
+                        message=f"Navigated to {step.get('url', '')}",
+                    )
+                )
             elif action == "observe":
                 page = await client.observe(screenshot=bool(screenshot_path))
-                results.append(BrowserActionResult(
-                    action="observe",
-                    target=None,
-                    success=True,
-                    message="Page observed",
-                    data={"elements_count": len(page.get("actions", []))},
-                ))
+                results.append(
+                    BrowserActionResult(
+                        action="observe",
+                        target=None,
+                        success=True,
+                        message="Page observed",
+                        data={"elements_count": len(page.get("actions", []))},
+                    )
+                )
             elif action == "click":
                 if target is None:
-                    results.append(BrowserActionResult(
-                        action="click",
-                        target=None,
-                        success=False,
-                        message="Click action requires a target node_id",
-                    ))
+                    results.append(
+                        BrowserActionResult(
+                            action="click",
+                            target=None,
+                            success=False,
+                            message="Click action requires a target node_id",
+                        )
+                    )
                 else:
                     result = await client.click(int(target), page)
                     results.append(result)
@@ -669,12 +747,14 @@ async def run_browser_task(
                         page = await client.observe(screenshot=bool(screenshot_path))
             elif action == "fill":
                 if target is None:
-                    results.append(BrowserActionResult(
-                        action="fill",
-                        target=None,
-                        success=False,
-                        message="Fill action requires a target node_id",
-                    ))
+                    results.append(
+                        BrowserActionResult(
+                            action="fill",
+                            target=None,
+                            success=False,
+                            message="Fill action requires a target node_id",
+                        )
+                    )
                 else:
                     result = await client.fill(int(target), text or "", page)
                     results.append(result)
@@ -682,12 +762,14 @@ async def run_browser_task(
                         page = await client.observe(screenshot=bool(screenshot_path))
             elif action == "select":
                 if target is None:
-                    results.append(BrowserActionResult(
-                        action="select",
-                        target=None,
-                        success=False,
-                        message="Select action requires a target node_id",
-                    ))
+                    results.append(
+                        BrowserActionResult(
+                            action="select",
+                            target=None,
+                            success=False,
+                            message="Select action requires a target node_id",
+                        )
+                    )
                 else:
                     result = await client.select(int(target), text or "", page)
                     results.append(result)
@@ -704,16 +786,23 @@ async def run_browser_task(
                 if result.success:
                     page = await client.observe(screenshot=bool(screenshot_path))
             else:
-                results.append(BrowserActionResult(
-                    action=action or "unknown",
-                    target=str(target) if target else None,
-                    success=False,
-                    message=f"Unknown action: {action}",
-                ))
+                results.append(
+                    BrowserActionResult(
+                        action=action or "unknown",
+                        target=str(target) if target else None,
+                        success=False,
+                        message=f"Unknown action: {action}",
+                    )
+                )
 
             # Save screenshot if requested
             if screenshot_path and page.get("screenshot"):
-                elapsed = int((time.perf_counter() - (client._started_at or time.perf_counter())) * 1000)
-                (screenshot_path / f"{elapsed:06d}.jpg").write_bytes(base64.b64decode(page["screenshot"]))
+                elapsed = int(
+                    (time.perf_counter() - (client._started_at or time.perf_counter()))
+                    * 1000
+                )
+                (screenshot_path / f"{elapsed:06d}.jpg").write_bytes(
+                    base64.b64decode(page["screenshot"])
+                )
 
     return results

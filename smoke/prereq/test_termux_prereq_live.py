@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 import pytest
@@ -18,11 +19,9 @@ import pytest
 def is_termux() -> bool:
     """Detect if running inside Termux."""
     prefix = os.environ.get("PREFIX", "")
-    if "com.termux" in prefix:
-        return True
-    if platform.system() == "Linux" and "android" in platform.platform().lower():
-        return True
-    return False
+    return ("com.termux" in prefix) or (
+        platform.system() == "Linux" and "android" in platform.platform().lower()
+    )
 
 
 pytestmark = [pytest.mark.live, pytest.mark.smoke_target("termux")]
@@ -33,10 +32,8 @@ def test_termux_detection():
     # This test always runs to document the detection criteria
     prefix = os.environ.get("PREFIX", "")
     uname_o = ""
-    try:
+    with suppress(Exception):
         uname_o = subprocess.check_output(["uname", "-o"], text=True).strip()
-    except Exception:
-        pass
 
     detected = ("com.termux" in prefix) or (uname_o == "Android")
     expected = is_termux()
@@ -95,14 +92,21 @@ def test_installer_rejects_voice_local():
 
     # Run with --voice-local and --dry-run, should fail
     result = subprocess.run(
-        [sys.executable, "-c", f"import subprocess; subprocess.run(['sh', '{install_sh}', '--voice-local', '--dry-run'], capture_output=True, text=True)"],
+        [
+            sys.executable,
+            "-c",
+            f"import subprocess; subprocess.run(['sh', '{install_sh}', '--voice-local', '--dry-run'], capture_output=True, text=True)",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
     # The installer should fail with a clear message
     assert result.returncode != 0
-    assert "not supported on Android" in result.stderr or "not supported on Android" in result.stdout
+    assert (
+        "not supported on Android" in result.stderr
+        or "not supported on Android" in result.stdout
+    )
 
 
 @pytest.mark.skipif(not is_termux(), reason="Only runs inside Termux")
@@ -113,13 +117,20 @@ def test_installer_rejects_torch_backend():
     assert install_sh.exists()
 
     result = subprocess.run(
-        [sys.executable, "-c", f"import subprocess; subprocess.run(['sh', '{install_sh}', '--torch-backend', 'cu130', '--dry-run'], capture_output=True, text=True)"],
+        [
+            sys.executable,
+            "-c",
+            f"import subprocess; subprocess.run(['sh', '{install_sh}', '--torch-backend', 'cu130', '--dry-run'], capture_output=True, text=True)",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
     assert result.returncode != 0
-    assert "not supported on Android" in result.stderr or "not supported on Android" in result.stdout
+    assert (
+        "not supported on Android" in result.stderr
+        or "not supported on Android" in result.stdout
+    )
 
 
 @pytest.mark.skipif(not is_termux(), reason="Only runs inside Termux")
@@ -170,12 +181,13 @@ def test_luicode_server_starts():
         time.sleep(3)
 
         # Check if process is still alive
-        assert proc.poll() is None, f"Server exited early: {proc.stderr.read()}"
+        stderr = proc.stderr.read() if proc.stderr is not None else ""
+        assert proc.poll() is None, f"Server exited early: {stderr}"
 
         # Try to connect to default port
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
-        result = sock.connect_ex(("127.0.0.1", 8080))
+        sock.connect_ex(("127.0.0.1", 8080))
         sock.close()
 
         # Port might be different, so just verify process is running

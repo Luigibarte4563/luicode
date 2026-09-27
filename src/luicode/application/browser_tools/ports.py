@@ -9,6 +9,7 @@ from luicode.core.browser_tools import BrowserActionResult, BrowserState
 @dataclass(frozen=True, slots=True)
 class BrowserAutomationConfig:
     """Configuration for browser automation."""
+
     headless: bool = False
     default_timeout: float = 30.0
     screenshot_on_error: bool = False
@@ -33,4 +34,6 @@ class BrowserToolsPort(Protocol):
 
     async def close(self) -> None: ...
 
-    async def run_task(self, steps: list[dict[str, Any]]) -> list[BrowserActionResult]: ...
+    async def run_task(
+        self, steps: list[dict[str, Any]]
+    ) -> list[BrowserActionResult]: ...

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "luicode"
-version = "1.0.0"
+dynamic = ["version"]
 description = "The local gateway for agentic coding: one proxy and Admin UI across providers and coding agents"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -77,6 +77,11 @@ packages = ["src/luicode"]
 [tool.hatch.build.targets.wheel.shared-scripts]
 "scripts/update/luicode-update" = "luicode-update"
 "scripts/update/luicode-update.cmd" = "luicode-update.cmd"
+
+[tool.hatch.version]
+source = "regex"
+path = "src/luicode/_version/__init__.py"
+pattern = '''__version__ = ["'](?P<version>.+)["']'''
 
 [tool.uv]
 required-version = ">=0.12.13"
