@@ -26,6 +26,7 @@ HERMETIC_TOOLS = (
     "mkdir",
     "mktemp",
     "ps",
+    "rm",
     "sed",
     "uname",
 )
@@ -240,11 +241,11 @@ class TermuxHarness:
     def reset_pkg(self, text: str) -> None:
         _write_executable(self.bin_dir / "pkg", text)
 
-    def restrict_path(self) -> bool:
+    def narrow_path(self) -> None:
         """Limit PATH to the stub directory plus the tools the installer needs.
 
-        Returns False unless the shell can actually use that PATH, so a caller
-        skips instead of asserting on an environment it could not isolate.
+        `shutil.which` resolves against the host PATH, so the real tools are
+        linked into the sandbox before PATH is replaced with it.
         """
         tools_dir = self.root / "hermetic-tools"
         tools_dir.mkdir(exist_ok=True)
@@ -260,18 +261,51 @@ class TermuxHarness:
             except OSError:
                 shutil.copy2(resolved, link)
         self.env["PATH"] = os.pathsep.join((str(self.bin_dir), str(tools_dir)))
-        probe = subprocess.run(
-            [
-                "/bin/sh",
-                "-c",
-                "command -v awk >/dev/null 2>&1 && ! command -v git >/dev/null 2>&1",
-            ],
-            check=False,
-            capture_output=True,
-            env=self.env | {"FAIL_STEP": ""},
-            timeout=60,
+
+    def _probe_path(self, script: str) -> bool:
+        return (
+            subprocess.run(
+                ["/bin/sh", "-c", script],
+                check=False,
+                capture_output=True,
+                env=self.env | {"FAIL_STEP": ""},
+                timeout=60,
+            ).returncode
+            == 0
         )
-        return probe.returncode == 0
+
+    def restrict_path(self) -> bool:
+        """Limit PATH to the stub directory plus the tools the installer needs.
+
+        Returns False unless the shell can actually use that PATH, so a caller
+        skips instead of asserting on an environment it could not isolate.
+        """
+        self.narrow_path()
+        return self._probe_path(
+            "command -v awk >/dev/null 2>&1 && ! command -v git >/dev/null 2>&1"
+        )
+
+    def restrict_path_without_python(self) -> bool:
+        """Limit PATH so no interpreter resolves outside the stub directory.
+
+        A scenario that deletes the stub `python` only tests the missing-Python
+        path when the host interpreter cannot stand in for it. Otherwise
+        `command -v python` succeeds, the installer reports Python as already
+        installed, never calls `pkg install`, and the scenario silently asserts
+        on the wrong code path.
+
+        Unlike `restrict_path`, git and curl stay installed, so this only
+        denies the interpreter.
+
+        Returns False unless the shell can actually be denied an interpreter, so
+        a caller skips instead of asserting on an environment it could not
+        isolate.
+        """
+        self.narrow_path()
+        return self._probe_path(
+            "! command -v python >/dev/null 2>&1"
+            " && ! command -v python3 >/dev/null 2>&1"
+        )
 
 
 @pytest.fixture
@@ -474,6 +508,8 @@ def test_requirements_txt_is_used_without_pyproject(termux_harness: TermuxHarnes
 
 def test_missing_python_is_installed_by_pkg(termux_harness: TermuxHarness):
     (termux_harness.bin_dir / "python").unlink()
+    if not termux_harness.restrict_path_without_python():
+        pytest.skip("host PATH still resolves a Python interpreter")
 
     result = termux_harness.run()
 
@@ -485,6 +521,8 @@ def test_failed_pkg_install_reports_the_command_and_a_remedy(
     termux_harness: TermuxHarness,
 ):
     (termux_harness.bin_dir / "python").unlink()
+    if not termux_harness.restrict_path_without_python():
+        pytest.skip("host PATH still resolves a Python interpreter")
 
     result = termux_harness.run(fail_step="pkg-python")
 
