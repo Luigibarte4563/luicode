@@ -63,21 +63,30 @@ reasoning control, and token-saving optimizations applied in between.
 
 ### 1. Install
 
-macOS/Linux:
+#### macOS / Linux
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh" | sh
 ```
 
-Windows PowerShell:
+#### Windows PowerShell
 
 ```powershell
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.ps1")))
 ```
 
+#### Android (Termux)
+
+```bash
+# Install Termux from F-Droid first, then run:
+curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh" | sh
+```
+
+See [docs/android.md](docs/android.md) for complete Android/Termux setup including persistence, wake locks, and LAN access.
+
 When prompted, choose at least one coding agent and optionally RTK. You can review the installers before running them: [install.sh](scripts/install.sh) and [install.ps1](scripts/install.ps1).
 
-**Optional:** Enable browser automation for web interaction capabilities:
+**Optional:** Enable browser automation for web interaction capabilities (not available on Android):
 
 ```bash
 uv sync --extra browser
@@ -103,9 +112,25 @@ Run:
 luicode-server
 ```
 
+#### Android (Termux)
+
+Run:
+
+```bash
+luicode-server
+```
+
+For background persistence, acquire a wake lock and disable battery optimization:
+
+```bash
+termux-wake-lock
+luicode-server
+```
+
+See [docs/android.md](docs/android.md) for auto-start (Termux:Boot), notifications (Termux:API), and LAN access.
+
 luicode opens the Admin UI after starting. On Windows and macOS, use the tray or
-menu-bar icon to open Admin, restart, or quit. When using `luicode-server`, keep its
-terminal open.
+menu-bar icon to open Admin, restart, or quit. On Android, use `termux-open-url` to open the Admin UI. When using `luicode-server`, keep its terminal open.
 
 <a id="nvidia-nim-provider"></a>
 
@@ -431,7 +456,7 @@ Configure integrations from **Admin UI → Messaging**, then click **Apply**.
 
 NVIDIA NIM transcription support is included in every installation. In **Admin UI → Messaging → Voice**, enable voice notes, select `nvidia_nim`, and choose a supported model. Configure your **NVIDIA NIM API key** on the Providers page.
 
-For local Whisper on CPU or CUDA, re-run the installer with the local voice option:
+For local Whisper on CPU or CUDA, re-run the installer with the local voice option (not available on Android):
 
 macOS/Linux:
 
@@ -463,12 +488,16 @@ Local Whisper with CUDA 13.0:
 
 Restart `luicode-server`. In **Admin UI → Messaging → Voice**, enable voice notes, select `cpu`, `cuda`, or `nvidia_nim`, and choose the Whisper model. Local gated models need `HUGGINGFACE_API_KEY`; NVIDIA NIM transcription needs `NVIDIA_NIM_API_KEY`.
 
+**Android/Termux:** Local Whisper is not supported. Use NVIDIA NIM remote transcription only.
+
 </details>
 
 <details>
 <summary><strong>Browser automation</strong></summary>
 
 Enable browser automation for coding agents to interact with web pages programmatically. This feature uses Chrome DevTools Protocol (CDP) via [browser-harness](https://github.com/browser-use/browser-harness) — the same engine that powers [JEV-Ultrafast](https://github.com/browser-use/jev-ultrafast).
+
+**Not available on Android/Termux** (no embeddable Chromium).
 
 ### Install
 
@@ -477,7 +506,7 @@ Enable browser automation for coding agents to interact with web pages programma
 uv sync --extra browser
 ```
 
-Or when using the installer, select the browser automation option (if available).
+Or when using the installer, select the browser automation option (if available on your platform).
 
 ### Requirements
 
@@ -592,6 +621,7 @@ Windows PowerShell:
 - [Report bugs or request features](https://github.com/Luigibarte4563/luicode/issues)
 - [Contributing guide](CONTRIBUTING.md)
 - [Product E2E smoke tests](smoke/README.md)
+- [Android/Termux guide](docs/android.md)
 
 ## License
 
