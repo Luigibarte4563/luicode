@@ -11,6 +11,7 @@ _PACKAGE_ROOT = _REPO_ROOT / "src" / "luicode"
 _PACKAGE_NAME = "luicode"
 
 ALLOWED_PACKAGE_DEPENDENCIES: dict[str, set[str]] = {
+    "_version": set(),
     "config": {"core"},
     "core": set(),
     "application": {"config", "core"},

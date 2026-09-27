@@ -30,7 +30,7 @@ def test_provider_and_messaging_progress_preserve_settings(page, admin_base_url)
     test = dialog.get_by_role("button", name="Refresh models", exact=True)
     expect(test).to_be_disabled()
     expect(test).to_have_attribute("aria-busy", "true")
-    expect(page.locator('[data-provider-check-result="open_router"]')).to_have_text(
+    expect(page.locator('[data-provider-pill="open_router"]')).to_have_text(
         "Checking models…"
     )
     expect(dialog.locator("#providerDialogCheck")).to_have_text("Checking models…")
@@ -52,7 +52,7 @@ def test_provider_and_messaging_progress_preserve_settings(page, admin_base_url)
     expect(
         dialog.get_by_role("button", name="Refresh models", exact=True)
     ).to_be_enabled()
-    expect(page.locator('[data-provider-check-result="open_router"]')).to_have_text(
+    expect(page.locator('[data-provider-pill="open_router"]')).to_have_text(
         "3 models available"
     )
     expect(dialog.locator("#providerDialogCheck")).to_have_text("3 models available")

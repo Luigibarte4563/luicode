@@ -143,7 +143,7 @@ def test_unverified_warning_survives_apply(
     expect(page.locator("#applyButton")).to_have_text("Apply")
     expect(page.locator("#messageArea")).to_contain_text("Verification unavailable.")
 
-    current = page.locator('[data-provider-check-result="lmstudio"]')
+    current = page.locator('[data-provider-pill="lmstudio"]')
     with page.expect_response("**/admin/api/providers/local-status") as response:
         old = availability.pop(0)
         if restart:
@@ -157,7 +157,9 @@ def test_unverified_warning_survives_apply(
             old.fulfill(json=payload)
     response.value.finished()
     page.evaluate("() => new Promise(requestAnimationFrame)")
-    expect(current).to_be_hidden()
+    # The stale sweep is discarded, so the pill falls back to configuration state
+    # until a fresh availability result arrives.
+    expect(current).to_have_text("connected")
 
     if restart:
         availability.pop().fulfill(status=503, json={"detail": "New check failed"})

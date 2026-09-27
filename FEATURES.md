@@ -229,6 +229,7 @@ Enable coding agents to **navigate, click, fill forms, extract data** from web p
 ```python
 from luicode.application.browser_tools.ports import BrowserToolsPort
 
+
 async def my_handler(browser_tools: BrowserToolsPort):
     await browser_tools.navigate("https://example.com")
     state = await browser_tools.observe()

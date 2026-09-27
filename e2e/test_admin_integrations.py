@@ -147,7 +147,7 @@ def test_codex_connect_disconnect_and_modal_paths(
     )
     page.locator("#confirmCodexIntegration").click()
     expect(opener).to_have_text("Connect")
-    expect(opener).to_have_css("color", "rgb(31, 20, 4)")
+    expect(opener).to_have_css("color", "rgb(10, 31, 21)")
     expect(page.locator("#codexIntegrationStatus")).to_have_count(0)
     assert tomllib.loads(path.read_text()) == {"model": "my-choice"}
     assert not (tmp_path / "vscode" / "settings.json").exists()
@@ -218,7 +218,7 @@ def test_connect_disconnect_and_modal_dismissal(page, admin_base_url, tmp_path):
     card_button.click()
     action.click()
     expect(card_button).to_have_text("Connect")
-    expect(card_button).to_have_css("color", "rgb(31, 20, 4)")
+    expect(card_button).to_have_css("color", "rgb(10, 31, 21)")
     expect(page.locator("#claudeIntegrationStatus")).to_have_count(0)
     assert json.loads(path.read_text()) == {}
     assert json.loads(state_path.read_text())["hasCompletedOnboarding"] is True

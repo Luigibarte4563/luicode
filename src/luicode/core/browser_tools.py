@@ -7,6 +7,7 @@ from typing import Any
 @dataclass(frozen=True, slots=True)
 class BrowserActionResult:
     """Result of a browser automation action."""
+
     action: str
     target: str | None
     success: bool
@@ -17,6 +18,7 @@ class BrowserActionResult:
 @dataclass(frozen=True, slots=True)
 class BrowserState:
     """Current browser state snapshot."""
+
     url: str
     title: str
     text: str

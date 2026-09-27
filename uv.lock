@@ -1140,7 +1140,6 @@ wheels = [
 
 [[package]]
 name = "luicode"
-version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -1231,7 +1230,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'voice-local'", specifier = ">=5.17.0" },
     { name = "uvicorn", specifier = ">=0.53.0" },
 ]
-provides-extras = ["voice-local", "browser"]
+provides-extras = ["browser", "voice-local"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -670,7 +670,10 @@ function updateConnectedAccountCard(provider, status) {
 }
 
 async function startConnectedAccountLogin(providerId, mode, button) {
-  const buttons = button.closest(".provider-actions").querySelectorAll("button");
+  // Login actions live in a provider card row; disable every sibling action
+  // while the login request is in flight.
+  const row = button.closest(".provider-card-actions, .provider-actions");
+  const buttons = row ? row.querySelectorAll("button") : [button];
   buttons.forEach((action) => { action.disabled = true; });
   clearConnectedAccountPoll(providerId);
   const popup = mode === "browser" ? window.open("about:blank", "_blank") : null;
@@ -827,13 +830,17 @@ function renderProviderCheckResult(providerId) {
       }
       if (account?.state === "error") meta.classList.add("error");
     }
-    // Also update dialog
-    if (state.providerId === providerId) {
-      const modalResult = byId("providerDialogCheck");
-      modalResult.className = `provider-check-result ${status}`;
-      modalResult.textContent = message;
-      modalResult.hidden = !message;
-    }
+    // The dialog check stays empty for connected accounts; their card meta
+    // carries the result.
+    return;
+  }
+
+  // Keep the dialog's live status in step with the card while a check runs.
+  if (state.providerId === providerId) {
+    const modalResult = byId("providerDialogCheck");
+    modalResult.className = `provider-check-result ${status}`;
+    modalResult.textContent = message;
+    modalResult.hidden = !message;
   }
 }
 

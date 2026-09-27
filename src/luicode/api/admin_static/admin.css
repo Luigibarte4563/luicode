@@ -637,13 +637,6 @@ button.startup-busy::before,
   line-height: 1.4;
 }
 
-.provider-meta {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
 .provider-check-result {
   color: var(--muted);
   font-size: 12px;
@@ -658,8 +651,6 @@ button.startup-busy::before,
 .provider-check-result.error {
   color: var(--error);
 }
-
-.provider-meta.error { color: var(--error); }
 
 .provider-check-result.checking {
   color: var(--info);
@@ -1026,7 +1017,8 @@ button.startup-busy::before,
   display: none;
 }
 
-.settings-section.show-advanced .advanced-field {
+.settings-section.show-advanced .advanced-field,
+.provider-dialog .advanced-field {
   display: flex;
 }
 

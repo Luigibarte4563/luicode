@@ -532,6 +532,7 @@ The browser automation is exposed via the `BrowserToolsPort` protocol in the app
 ```python
 from luicode.application.browser_tools.ports import BrowserToolsPort
 
+
 # In your handler/service
 async def my_handler(browser_tools: BrowserToolsPort):
     await browser_tools.navigate("https://example.com")
