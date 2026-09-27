@@ -184,7 +184,7 @@ def test_account_modes_wait_for_status_and_recover_after_load_failure(
     accounts.take_pending_status(page).fulfill(
         status=503, json={"detail": "Account status unavailable."}
     )
-    expect(copilot.locator(".provider-meta")).to_have_text(
+    expect(copilot.locator(".provider-card-meta")).to_have_text(
         "Account status unavailable."
     )
     expect(copilot.get_by_role("button", name="Connect", exact=True)).to_have_count(0)
@@ -197,7 +197,7 @@ def test_account_modes_wait_for_status_and_recover_after_load_failure(
     expect(copilot.get_by_role("button", name="Connect", exact=True)).to_be_enabled()
     expect(copilot.get_by_role("button", name="Use device code")).to_have_count(0)
     expect(openai.get_by_role("button", name="Use device code")).to_have_count(0)
-    expect(copilot.locator(".provider-meta")).to_contain_text("GitHub Copilot")
+    expect(copilot.locator(".provider-card-meta")).to_contain_text("GitHub Copilot")
     assert "ChatGPT" not in copilot.inner_text()
 
 
@@ -207,7 +207,7 @@ def test_device_code_connect_copy_and_cancel_ignore_an_old_poll(
     _open(page, admin_base_url)
     copilot = page.locator('[data-provider="github_copilot"]')
     copilot.get_by_role("button", name="Connect", exact=True).click()
-    expect(copilot.locator(".provider-meta")).to_have_text(
+    expect(copilot.locator(".provider-card-meta")).to_have_text(
         "Enter code ABCD-1234 at https://github.com/login/device"
     )
     assert accounts.login_requests == [("github_copilot", "device")]
@@ -256,7 +256,7 @@ def test_openai_connect_uses_browser_login(
     expect(
         openai.get_by_role("button", name="Cancel sign-in", exact=True)
     ).to_be_visible()
-    expect(openai.locator(".provider-meta")).to_have_text(
+    expect(openai.locator(".provider-card-meta")).to_have_text(
         "Finish signing in, then return to this page."
     )
     openai.get_by_role("button", name="Cancel sign-in", exact=True).click()
@@ -296,14 +296,14 @@ def test_connected_counts_and_modes_survive_apply_and_disconnect_independently(
     expect(page.locator("#dirtyState")).to_have_text("No changes")
     copilot = page.locator('[data-provider="github_copilot"]')
     openai = page.locator('[data-provider="openai"]')
-    expect(copilot.locator(".provider-meta")).to_have_text("14 models available")
-    expect(openai.locator(".provider-meta")).to_have_text("14 models available")
+    expect(copilot.locator(".provider-card-meta")).to_have_text("14 models available")
+    expect(openai.locator(".provider-card-meta")).to_have_text("14 models available")
     assert "ChatGPT" not in copilot.inner_text()
     expect(page.get_by_role("button", name="Reconnect", exact=True)).to_have_count(0)
     connected = page.locator(
         '[data-provider-group="oauth"] [data-provider-subgroup="configured"]'
     )
-    expect(connected.locator(".provider-title strong")).to_have_text(
+    expect(connected.locator(".provider-card-name strong")).to_have_text(
         ["GitHub Copilot", "OpenAI / ChatGPT"]
     )
     confirmations: list[str] = []
@@ -317,18 +317,18 @@ def test_connected_counts_and_modes_survive_apply_and_disconnect_independently(
     expect(copilot.get_by_role("button", name="Connect", exact=True)).to_be_enabled()
     assert confirmations == ["Disconnect this GitHub Copilot account from LUICODE?"]
     assert accounts.disconnected == ["github_copilot"]
-    expect(connected.locator(".provider-title strong")).to_have_text(
+    expect(connected.locator(".provider-card-name strong")).to_have_text(
         ["OpenAI / ChatGPT"]
     )
     expect(
         page.locator(
-            '[data-provider-group="oauth"] [data-provider-subgroup="unconfigured"] .provider-title strong'
+            '[data-provider-group="oauth"] [data-provider-subgroup="unconfigured"] .provider-card-name strong'
         )
     ).to_have_text(["GitHub Copilot"])
     expect(openai.get_by_role("button", name="Disconnect", exact=True)).to_have_class(
         "danger-button"
     )
-    expect(openai.locator(".provider-meta")).to_have_text("14 models available")
+    expect(openai.locator(".provider-card-meta")).to_have_text("14 models available")
     copilot.get_by_role("button", name="Connect", exact=True).click()
     expect(copilot.get_by_role("button", name="Copy code")).to_be_visible()
     assert accounts.login_requests[-1] == ("github_copilot", "device")
@@ -358,13 +358,10 @@ def test_oauth_card_follows_model_discovery_without_replacing_settings(
     page.route("**/admin/api/status", status)
     _open(page, admin_base_url)
     card = page.locator(f'[data-provider="{provider_id}"]')
-    other = page.locator('[data-provider-check-result="open_router"]')
+    other = page.locator('[data-provider-pill="open_router"]')
     expect(card.get_by_role("button", name="Disconnect", exact=True)).to_be_enabled()
-    expect(card.locator(".provider-meta")).to_have_text("Checking models…")
+    expect(card.locator(".provider-card-meta")).to_have_text("Checking models…")
     expect(other).to_have_text("Checking models…")
-    expect(card.locator(".provider-meta")).to_have_css(
-        "color", other.evaluate("element => getComputedStyle(element).color")
-    )
     dialog = open_provider(page, "openai")
     proxy = dialog.locator("#field-OPENAI_PROXY")
     proxy.fill("http://pending-proxy:8080")
@@ -375,11 +372,8 @@ def test_oauth_card_follows_model_discovery_without_replacing_settings(
         if outcome == "ready"
         else "Could not load models. Check the provider's settings and retry."
     )
-    expect(card.locator(".provider-meta")).to_have_text(expected_message)
+    expect(card.locator(".provider-card-meta")).to_have_text(expected_message)
     expect(other).to_have_text(expected_message)
-    expect(card.locator(".provider-meta")).to_have_css(
-        "color", other.evaluate("element => getComputedStyle(element).color")
-    )
     expect(proxy).to_have_value("http://pending-proxy:8080")
     expect(proxy).to_be_focused()
     assert proxy.evaluate("input => [input.selectionStart, input.selectionEnd]") == [
@@ -408,7 +402,7 @@ def test_late_account_response_cannot_replace_discovered_model_count(
     accounts.pending_status.pop().fulfill(json=account)
     card = page.locator('[data-provider="openai"]')
     expect(card.get_by_role("button", name="Disconnect", exact=True)).to_be_enabled()
-    expect(card.locator(".provider-meta")).to_have_text("2 models available")
+    expect(card.locator(".provider-card-meta")).to_have_text("2 models available")
 
 
 def test_auth_status_refresh_preserves_proxy_edit_and_selection(

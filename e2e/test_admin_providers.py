@@ -151,10 +151,10 @@ def test_startup_model_count_handles_empty_and_single_model_catalogs(
 
     page.route("**/admin/api/status", status)
     _open_admin(page, admin_base_url, {"width": 1280, "height": 720})
-    expect(page.locator('[data-provider-check-result="open_router"]')).to_have_text(
+    expect(page.locator('[data-provider-pill="open_router"]')).to_have_text(
         "1 model available" if models else "0 models available"
     )
-    expect(page.locator('[data-provider-check-result="nvidia_nim"]')).to_be_hidden()
+    expect(page.locator('[data-provider-pill="nvidia_nim"]')).to_be_hidden()
 
 
 @pytest.mark.parametrize("manual_result", ["pending", "success", "failure"])
@@ -199,7 +199,7 @@ def test_delayed_startup_status_does_not_replace_a_manual_provider_check(
             if manual_result == "success"
             else "Unavailable: Could not refresh this provider's models."
         )
-    result = page.locator('[data-provider-check-result="open_router"]')
+    result = page.locator('[data-provider-pill="open_router"]')
     expect(result).to_have_text(expected)
     with page.expect_response("**/admin/api/status") as response:
         startup[0].fulfill(json=snapshot)
@@ -227,7 +227,7 @@ def test_local_model_discovery_takes_precedence_over_reachability(
     snapshot = page.request.get(f"{admin_base_url}/admin/api/status").json()
     snapshot["startup"]["providers"]["lmstudio"] = "ready"
     snapshot["cached_models"]["lmstudio"] = ["local-model"]
-    result = page.locator('[data-provider-check-result="lmstudio"]')
+    result = page.locator('[data-provider-pill="lmstudio"]')
     if availability_first:
         availability.pop().continue_()
         expect(result).to_have_text("Reachable: http://localhost:1234/v1")
@@ -313,13 +313,13 @@ def test_admin_loading_finishes_before_local_availability_checks(
     providers["llamacpp"].update(status="offline", label="Offline", status_code=503)
     providers["ollama"].update(status="missing_url", label="Missing URL", base_url="")
     route.fulfill(json=payload)
-    expect(page.locator('[data-provider-check-result="lmstudio"]')).to_have_text(
+    expect(page.locator('[data-provider-pill="lmstudio"]')).to_have_text(
         "Reachable: http://localhost:1234/v1"
     )
-    expect(page.locator('[data-provider-check-result="llamacpp"]')).to_have_text(
+    expect(page.locator('[data-provider-pill="llamacpp"]')).to_have_text(
         "Unavailable: http://localhost:8080/v1 returned HTTP 503"
     )
-    expect(page.locator('[data-provider-check-result="ollama"]')).to_be_hidden()
+    expect(page.locator('[data-provider-pill="ollama"]')).to_be_hidden()
     expect(
         page.locator('[data-provider="lmstudio"]').get_by_role(
             "button", name="Manage", exact=True
@@ -361,7 +361,7 @@ def test_local_availability_failure_does_not_fail_admin_loading(
         dialog = open_provider(page, provider_id)
         expect(dialog.get_by_role("button", name="Test", exact=True)).to_be_enabled()
         close_provider(page)
-    expect(page.locator('[data-provider-check-result="open_router"]')).to_have_text(
+    expect(page.locator('[data-provider-pill="open_router"]')).to_have_text(
         "3 models available"
     )
     expect(page.locator("#messageArea")).to_have_text("")
@@ -407,7 +407,7 @@ def test_manual_provider_test_takes_precedence_over_automatic_availability(
             availability.pop().continue_()
     response.value.finished()
     page.evaluate("() => new Promise(requestAnimationFrame)")
-    other = page.locator('[data-provider-check-result="ollama"]')
+    other = page.locator('[data-provider-pill="ollama"]')
     if manual_finished:
         expect(result).to_have_text(
             "Unavailable: Could not refresh this provider's models."

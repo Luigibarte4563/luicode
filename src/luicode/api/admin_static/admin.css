@@ -1026,7 +1026,8 @@ button.startup-busy::before,
   display: none;
 }
 
-.settings-section.show-advanced .advanced-field {
+.settings-section.show-advanced .advanced-field,
+.provider-dialog .advanced-field {
   display: flex;
 }
 
