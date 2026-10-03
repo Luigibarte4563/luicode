@@ -27,6 +27,7 @@ from luicode.application.errors import ApplicationError
 from luicode.application.execution import ProviderExecutor, TokenCounter
 from luicode.application.ports import ModelInfoLookup, ProviderResolver
 from luicode.application.routing import ModelRouter, RoutedMessagesRequest
+from luicode.application.usage import UsageSink
 from luicode.application.web_tools.ports import WebToolsPort
 from luicode.application.web_tools.service import WebToolService
 from luicode.config.settings import Settings
@@ -75,6 +76,7 @@ class MessagesHandler:
         generation_id: int | None = None,
         request_headers: Mapping[str, str] | None = None,
         model_info_lookup: ModelInfoLookup | None = None,
+        usage_sink: UsageSink | None = None,
     ) -> None:
         self._settings = settings
         self._model_router = model_router or ModelRouter(settings)
@@ -86,6 +88,7 @@ class MessagesHandler:
             log_raw_payloads=settings.log_raw_api_payloads,
             request_headers=request_headers,
             model_info_lookup=model_info_lookup,
+            usage_sink=usage_sink,
         )
         self._web_tools = WebToolService(
             settings=settings,
@@ -327,10 +330,14 @@ class MessagesHandler:
     def _intercept_local_optimization(
         self, routed: RoutedMessagesRequest
     ) -> _MessagesResult | None:
+        primary = routed.resolved.primary
         optimized = try_optimizations(
             routed.request,
             self._settings,
             response_model=routed.resolved.original_model,
+            request_id="",  # Will be filled in by caller if needed
+            provider_id=primary.provider_id,
+            provider_model=primary.provider_model,
         )
         if optimized is None:
             return None

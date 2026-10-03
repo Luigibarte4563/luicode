@@ -62,6 +62,7 @@ async def _create_messages_response(
             generation_id=lease.generation_id,
             request_headers=request_headers,
             model_info_lookup=lease.model_info,
+            usage_sink=services.admin.usage_sink,
         )
         response = await handler.create(request_data, request_id=request_id)
     except ApplicationError as exc:
@@ -96,6 +97,7 @@ async def _create_responses_response(
             provider_resolver=_provider_resolver(lease),
             generation_id=lease.generation_id,
             request_headers=request_headers,
+            usage_sink=services.admin.usage_sink,
         )
         response = await handler.create(request_data, request_id=request_id)
     except ApplicationError as exc:

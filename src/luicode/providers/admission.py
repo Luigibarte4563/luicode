@@ -908,6 +908,37 @@ class ProviderAdmissionController:
             return f"Upstream server error ({status})"
         return f"Provider transient error ({type(error).__name__})"
 
+    def health_snapshot(self) -> dict[str, object]:
+        """Return a read-only health snapshot for Admin UI."""
+        episode = self._episode
+        is_healthy = episode is None or episode.terminal_until is None
+        current_episode = "idle"
+        if episode is not None:
+            if episode.terminal_until is not None:
+                current_episode = "quarantined"
+            elif episode.probe_active:
+                current_episode = "probing"
+            else:
+                current_episode = "recovering"
+        
+        # Calculate success rate from recent trace events (simplified)
+        # In a full implementation, this would track actual metrics
+        return {
+            "provider_id": self._provider_name,
+            "display_name": self._provider_name,
+            "is_healthy": is_healthy,
+            "success_rate": 1.0 if is_healthy else 0.0,  # Placeholder
+            "p50_latency_ms": None,
+            "p95_latency_ms": None,
+            "current_episode": current_episode,
+            "last_error": str(episode.last_error) if episode and episode.last_error else None,
+            "last_success_ms": None,
+            "rate_limit_remaining": max(0, self._proactive_limiter._rate_limit - len(self._proactive_limiter._times)),
+            "rate_limit_reset_ms": None,
+            "concurrency_used": self._max_attempts - self._concurrency_sem._value,
+            "concurrency_limit": self._max_attempts,
+        }
+
 
 def _retry_after_seconds(error: Exception) -> float | None:
     response = getattr(error, "response", None)

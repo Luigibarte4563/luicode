@@ -57,6 +57,8 @@ _ADMIN_ASSET_FILENAMES = frozenset(
         "session_layout.css",
         "session_ui.js",
         "model_combobox.js",
+        "usage.css",
+        "usage.js",
         *(
             f"providers/{provider.logo_filename}"
             for provider in PROVIDER_CATALOG.values()
@@ -108,6 +110,7 @@ def admin_page_response() -> HTMLResponse:
 @router.get("/admin", include_in_schema=False)
 @router.get("/admin/model_config", include_in_schema=False)
 @router.get("/admin/messaging", include_in_schema=False)
+@router.get("/admin/usage", include_in_schema=False)
 @router.get("/admin/integrations", include_in_schema=False)
 def admin_page(request: Request):
     require_loopback_admin(request)
@@ -496,6 +499,134 @@ def _require_connected_account_provider(provider_id: str) -> None:
             status_code=404,
             detail="Provider does not support connected-account login.",
         )
+
+
+@router.get("/admin/api/usage/summary")
+async def usage_summary(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+    since_hours: int = 24,
+):
+    require_loopback_admin(request)
+    since_ms = int((__import__("time").time() - since_hours * 3600) * 1000)
+    db = await services.admin.usage_database()
+    return _no_store(db.get_summary(since_ms=since_ms))
+
+
+@router.get("/admin/api/usage/requests")
+async def usage_requests(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+    limit: int = 100,
+    offset: int = 0,
+    since_hours: int = 24,
+    provider_id: str | None = None,
+    agent: str | None = None,
+    outcome: str | None = None,
+):
+    require_loopback_admin(request)
+    since_ms = int((__import__("time").time() - since_hours * 3600) * 1000)
+    db = await services.admin.usage_database()
+    requests = db.query_requests(
+        since_ms=since_ms,
+        provider_id=provider_id,
+        agent=agent,
+        outcome=outcome,
+        limit=limit,
+        offset=offset,
+    )
+    return _no_store(
+        {
+            "requests": [r.to_row() for r in requests],
+            "limit": limit,
+            "offset": offset,
+        }
+    )
+
+
+@router.get("/admin/api/usage/optimizations")
+async def usage_optimizations(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+    limit: int = 100,
+    since_hours: int = 24,
+    optimization: str | None = None,
+):
+    require_loopback_admin(request)
+    since_ms = int((__import__("time").time() - since_hours * 3600) * 1000)
+    db = await services.admin.usage_database()
+    optimizations = db.query_optimizations(
+        since_ms=since_ms,
+        optimization=optimization,
+        limit=limit,
+    )
+    return _no_store(
+        {
+            "optimizations": [o.to_row() for o in optimizations],
+            "limit": limit,
+        }
+    )
+
+
+@router.get("/admin/api/providers/health")
+async def providers_health(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    lease = await services.requests.acquire()
+    try:
+        health_data = []
+        settings = lease.settings
+        # Get all provider IDs from catalog that are configured
+        for provider_id in settings.model_fields.keys():
+            if not provider_id.endswith("_api_key") and not provider_id.endswith("_proxy"):
+                continue
+            provider_base = provider_id.replace("_api_key", "").replace("_proxy", "").lower()
+            if provider_base in ("provider", "model", "reasoning", "messaging", "voice", "web", "diagnostics", "smoke"):
+                continue
+            # Try to resolve provider and get admission controller
+            try:
+                provider = await lease.resolve_provider(provider_base)
+                admission = provider.admission_controller()
+                if admission and hasattr(admission, "health_snapshot"):
+                    health_data.append(admission.health_snapshot())
+                else:
+                    health_data.append({
+                        "provider_id": provider_base,
+                        "display_name": provider_base,
+                        "is_healthy": True,
+                        "success_rate": 1.0,
+                        "p50_latency_ms": None,
+                        "p95_latency_ms": None,
+                        "current_episode": "idle",
+                        "last_error": None,
+                        "last_success_ms": None,
+                        "rate_limit_remaining": None,
+                        "rate_limit_reset_ms": None,
+                        "concurrency_used": 0,
+                        "concurrency_limit": 5,
+                    })
+            except Exception:
+                # Provider not configured or not available
+                health_data.append({
+                    "provider_id": provider_base,
+                    "display_name": provider_base,
+                    "is_healthy": False,
+                    "success_rate": 0.0,
+                    "p50_latency_ms": None,
+                    "p95_latency_ms": None,
+                    "current_episode": "not_configured",
+                    "last_error": "Provider not configured",
+                    "last_success_ms": None,
+                    "rate_limit_remaining": None,
+                    "rate_limit_reset_ms": None,
+                    "concurrency_used": 0,
+                    "concurrency_limit": 5,
+                })
+        return _no_store({"providers": health_data})
+    finally:
+        await lease.release()
 
 
 def _no_store(payload: JsonValue) -> JSONResponse:

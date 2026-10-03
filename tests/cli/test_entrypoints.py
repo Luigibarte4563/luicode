@@ -38,6 +38,7 @@ def test_cli_scripts_are_registered() -> None:
     )
 
     assert pyproject["project"]["scripts"] == {
+        "luicode": "luicode.cli.entrypoints:serve",
         "luicode-server": "luicode.cli.entrypoints:serve",
         "luicode-claude": "luicode.cli.launchers.claude:launch",
         "luicode-codex": "luicode.cli.launchers.codex:launch",

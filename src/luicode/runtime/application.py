@@ -27,6 +27,7 @@ from luicode.application.errors import (
 )
 from luicode.application.model_metadata import ProviderModelRefreshResult
 from luicode.application.ports import StopResult
+from luicode.application.usage import UsageSink, create_memory_sink
 from luicode.config.admin.persistence import (
     PreparedAdminUpdate,
 )
@@ -222,10 +223,21 @@ class ApplicationRuntime:
             "disabled" if self.settings.messaging_platform == "none" else "starting"
         )
         self._messaging_error: str | None = None
+        self._usage_sink: UsageSink | None = None
 
     @property
     def settings(self) -> Settings:
         return self.provider_manager.current_settings()
+
+    @property
+    def usage_sink(self) -> UsageSink:
+        if self._usage_sink is None:
+            self._usage_sink = create_memory_sink()
+        return self._usage_sink
+
+    async def usage_database(self) -> "UsageDatabase":
+        from luicode.runtime.usage_sqlite import get_usage_database
+        return await get_usage_database()
 
     @property
     def is_closed(self) -> bool:
@@ -1017,6 +1029,8 @@ class ApplicationRuntime:
         ):
             return False
         if not await self._cleanup_transcriber():
+            return False
+        if self._usage_sink is not None and not await best_effort("usage_sink.close", self._usage_sink.close()):
             return False
         if not self._provider_manager_closed:
             self._provider_manager_closed = await best_effort(
