@@ -20,13 +20,14 @@ Then open `http://127.0.0.1:8082/admin` in your browser.
 
 ### Navigation
 
-The sidebar provides access to five views:
+The sidebar provides access to six views:
 
 | View | Path | Purpose |
 |------|------|---------|
 | **Providers** | `/admin` | Configure cloud, local, and OAuth providers |
 | **Model Config** | `/admin/model_config` | Select models, reasoning, web tools |
 | **Messaging** | `/admin/messaging` | Configure messaging integrations |
+| **Usage** | `/admin/usage` | Token usage, costs, optimization savings, provider health |
 | **Integrations** | `/admin/integrations` | Connect editors (VS Code, JetBrains, etc.) |
 | **Code Sessions** | `/admin/code` | Browse and manage code sessions |
 
@@ -120,6 +121,93 @@ Each card has:
 2. Dialog shows files that will be modified
 3. Click **Connect** in dialog
 4. Reload/restart target application as instructed
+
+---
+
+## Usage Dashboard Tab
+
+The Usage Dashboard provides observability into token consumption, costs, and optimization effectiveness.
+
+### Overview Panel
+
+**Summary cards** show aggregated metrics for the selected time range (1h, 6h, 24h, 7d, 30d):
+- Total requests
+- Input / output / total tokens
+- Estimated cost (USD)
+- Unique providers and agents used
+
+**Time-series chart** (last 24 hours) with three lines:
+- Requests per hour
+- Tokens per hour (thousands)
+- Cost per hour (USD)
+
+### Request Log Panel
+
+Searchable, paginated table of individual requests:
+| Column | Description |
+|--------|-------------|
+| Request ID | Short ID (first 12 chars) |
+| Time | Relative timestamp (e.g., "5m ago") |
+| Agent | Client identifier (user-agent or session ID) |
+| Gateway Model | Tier requested (e.g., "sonnet", "opus") |
+| Provider / Model | Actual provider and model used |
+| Input / Output | Token counts (actual + estimated) |
+| Cost | Estimated USD (— if price unknown) |
+| Latency / TTFB | Total time / time to first byte |
+| Outcome | Success, fallback, failure, timeout, etc. |
+| Attempts | 1 = primary, >1 = fallback used |
+| Fallback Path | Chain of providers tried (→) |
+
+**Filters**: Provider, Agent, Outcome (success/fallback/failure/timeout/rate_limited/…), Time range
+
+### By Provider Panel
+
+Aggregated metrics per provider/model:
+- Request count
+- Input / output tokens
+- Estimated cost
+- Average latency
+
+### By Agent Panel
+
+Metrics grouped by client agent string (e.g., "claude-code/1.0.0", "codex", session IDs).
+
+### Optimizations Panel
+
+Real savings from each optimization handler:
+| Optimization | What it intercepts | Savings shown as |
+|--------------|-------------------|------------------|
+| `quota_mock` | Connectivity probes | Tokens + estimated cost |
+| `prefix_detection` | Command prefix detection | Tokens + estimated cost |
+| `title_skip` | "Conversation title" requests | Tokens + estimated cost |
+| `suggestion_skip` | Suggestion/completion requests | Tokens + estimated cost |
+| `filepath_mock` | Filepath extraction | Tokens + estimated cost |
+
+**Key difference from prior versions**: Savings use *actual* input token counts from the intercepted request (via `tiktoken`), not hardcoded constants. This makes the "up to 90% fewer tokens" claim measurable and defensible.
+
+### Provider Health Panel
+
+Read-only health snapshot from each provider's admission controller:
+| Column | Meaning |
+|--------|---------|
+| Status | Healthy / Degraded / Not configured |
+| Episode | Idle / Probing / Recovering / Quarantined |
+| Success Rate | Recent success ratio (placeholder in v1) |
+| P50 / P95 Latency | Percentile latencies (placeholder) |
+| Rate Limit Remaining | Tokens left in sliding window |
+| Last Error | Most recent error message (truncated) |
+
+### Data Storage
+
+- **Database**: `~/.luicode/usage/usage.db` (SQLite, WAL mode)
+- **Separate from**: `~/.luicode/code/code.db` (code sessions)
+- **Retention**: 90 days or 100,000 rows by default
+- **Write path**: Background task, batched flush every ~1 second, never blocks request path
+- **Schema**: `request_usage`, `optimization_savings` tables with indexes on time, provider, agent
+
+### Price Table
+
+Bundled prices in `config/pricing.toml` (53+ providers). User overrides in `~/.luicode/pricing.override.toml` (same schema). Missing prices show as "—" (never $0.00 for paid models). Free/local providers explicitly priced at $0.
 
 ---
 

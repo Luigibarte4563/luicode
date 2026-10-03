@@ -36,6 +36,7 @@ from .routing import (
     RoutedMessagesRequest,
     RoutedResponsesRequest,
 )
+from .usage import UsageObserver, UsageSink, create_memory_sink
 
 TokenCounter = Callable[
     [list[Message], str | list[SystemContent] | None, list[Tool] | None],
@@ -62,6 +63,7 @@ class ProviderExecutor:
         log_raw_payloads: bool = False,
         request_headers: Mapping[str, str] | None = None,
         model_info_lookup: ModelInfoLookup | None = None,
+        usage_sink: UsageSink | None = None,
     ) -> None:
         if not math.isfinite(progress_timeout_seconds) or progress_timeout_seconds <= 0:
             raise ValueError("progress_timeout_seconds must be finite and positive")
@@ -73,6 +75,7 @@ class ProviderExecutor:
         self._log_raw_payloads = log_raw_payloads
         self._request_headers = MappingProxyType(dict(request_headers or {}))
         self._progress_timeout_seconds = float(progress_timeout_seconds)
+        self._usage_sink = usage_sink or create_memory_sink()
 
     def _progress_timeout_failure(
         self,
@@ -161,6 +164,22 @@ class ProviderExecutor:
         if self._generation_id is not None:
             fields["generation_id"] = self._generation_id
         trace_event(**fields)
+
+    def _extract_agent(self) -> str:
+        """Extract agent identifier from request headers."""
+        headers = dict(self._request_headers)
+        lowered = {k.lower(): v for k, v in headers.items() if isinstance(v, str)}
+        # Check for known agent identifiers
+        for key in ("user-agent", "x-user-agent", "anthropic-version", "x-app", "x-client"):
+            val = lowered.get(key)
+            if val:
+                return val[:100]
+        # Fallback to session ID if available
+        for key in ("anthropic-session-id", "x-anthropic-session-id", "claude-session-id", "x-claude-session-id"):
+            val = lowered.get(key)
+            if val:
+                return f"session:{val[:50]}"
+        return "unknown"
 
     def stream_messages(
         self,
@@ -334,6 +353,10 @@ class ProviderExecutor:
         if self._log_raw_payloads:
             logger.debug(f"{raw_log_label} [{{}}]: {{}}", request_id, raw_log_payload)
 
+        agent = self._extract_agent()
+        fallback_path = tuple(c.provider_model_ref for c in candidates)
+        estimated_input_tokens = 0
+
         async def provider_body() -> AsyncIterator[str]:
             loop = asyncio.get_running_loop()
             progress_deadline = loop.time() + self._progress_timeout_seconds
@@ -356,7 +379,23 @@ class ProviderExecutor:
                         raise TypeError(
                             "provider stream method must return an async iterator"
                         )
-                    while provider_stream is not None:
+
+                    # Wrap with usage observer for this candidate
+                    observer = UsageObserver(
+                        sink=self._usage_sink,
+                        request_id=request_id,
+                        agent=agent,
+                        gateway_model=gateway_model,
+                        provider_id=target.provider_id,
+                        provider_model=target.provider_model,
+                        wire_api=wire_api,
+                        estimated_input_tokens=estimated_input_tokens,
+                        fallback_path=fallback_path,
+                        attempt_count=index + 1,
+                    )
+                    observed_stream = observer.observe(provider_stream)
+
+                    while True:
                         if loop.time() >= progress_deadline:
                             raise self._progress_timeout_failure(
                                 request_id=request_id,
@@ -367,7 +406,7 @@ class ProviderExecutor:
                         try:
                             async with progress_timeout:
                                 try:
-                                    chunk = await anext(provider_stream)
+                                    chunk = await anext(observed_stream)
                                 except ExecutionFailure as failure:
                                     read_failure = failure
                         except StopAsyncIteration:
