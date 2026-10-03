@@ -5,12 +5,13 @@ import importlib
 import inspect
 import logging
 import os
+import time
 import traceback
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from functools import partial
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from loguru import logger
 
@@ -27,7 +28,12 @@ from luicode.application.errors import (
 )
 from luicode.application.model_metadata import ProviderModelRefreshResult
 from luicode.application.ports import StopResult
-from luicode.application.usage import UsageSink, create_memory_sink
+from luicode.application.usage import (
+    OptimizationSaving,
+    RequestUsage,
+    UsageSink,
+    create_memory_sink,
+)
 from luicode.config.admin.persistence import (
     PreparedAdminUpdate,
 )
@@ -64,6 +70,7 @@ from luicode.providers.credential_validation import (
 if TYPE_CHECKING:
     import luicode.cli.managed as cli_managed
     import luicode.messaging.workflow as messaging_workflow_module
+    from luicode.runtime.usage_sqlite import UsageDatabase
 
 from luicode.application.readiness import InitializationWait
 from luicode.core.async_tasks import run_sync_owned
@@ -75,6 +82,16 @@ from .retired_chat import remove_retired_chat_history
 
 RestartCallback = Callable[[], None]
 IntegrationAction = Literal["status", "connect", "disconnect", "refresh"]
+
+
+async def _close_usage_database() -> None:
+    """Close the usage database.
+
+    Imported lazily so the SQLite stack stays off the startup import path.
+    """
+    from luicode.runtime.usage_sqlite import close_usage_database
+
+    await close_usage_database()
 
 
 @dataclass
@@ -232,12 +249,77 @@ class ApplicationRuntime:
     @property
     def usage_sink(self) -> UsageSink:
         if self._usage_sink is None:
-            self._usage_sink = create_memory_sink()
+            self._usage_sink = create_memory_sink(
+                on_flush=self._persist_usage_batch,
+            )
         return self._usage_sink
 
-    async def usage_database(self) -> "UsageDatabase":
+    async def _persist_usage_batch(
+        self,
+        requests: list[RequestUsage],
+        optimizations: list[OptimizationSaving],
+    ) -> None:
+        """Write one drained sink batch into the usage database."""
+        database = await self.usage_database()
+        await database.write_batch(requests, optimizations)
+
+    async def usage_database(self) -> UsageDatabase:
         from luicode.runtime.usage_sqlite import get_usage_database
+
         return await get_usage_database()
+
+    @staticmethod
+    def _usage_window_ms(since_hours: int) -> int:
+        """Return the inclusive start of a usage window in epoch milliseconds."""
+        return int((time.time() - max(since_hours, 0) * 3600) * 1000)
+
+    async def usage_summary(self, since_hours: int) -> JsonObject:
+        database = await self.usage_database()
+        summary = database.get_summary(since_ms=self._usage_window_ms(since_hours))
+        return cast(JsonObject, summary)
+
+    async def usage_requests(
+        self,
+        *,
+        since_hours: int,
+        limit: int,
+        offset: int,
+        provider_id: str | None,
+        agent: str | None,
+        outcome: str | None,
+    ) -> JsonObject:
+        database = await self.usage_database()
+        rows = database.query_requests(
+            since_ms=self._usage_window_ms(since_hours),
+            provider_id=provider_id,
+            agent=agent,
+            outcome=outcome,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "requests": [row.to_row() for row in rows],
+            "limit": limit,
+            "offset": offset,
+        }
+
+    async def usage_optimizations(
+        self,
+        *,
+        since_hours: int,
+        limit: int,
+        optimization: str | None,
+    ) -> JsonObject:
+        database = await self.usage_database()
+        rows = database.query_optimizations(
+            since_ms=self._usage_window_ms(since_hours),
+            optimization=optimization,
+            limit=limit,
+        )
+        return {
+            "optimizations": [row.to_row() for row in rows],
+            "limit": limit,
+        }
 
     @property
     def is_closed(self) -> bool:
@@ -1030,7 +1112,11 @@ class ApplicationRuntime:
             return False
         if not await self._cleanup_transcriber():
             return False
-        if self._usage_sink is not None and not await best_effort("usage_sink.close", self._usage_sink.close()):
+        if self._usage_sink is not None and not await best_effort(
+            "usage_sink.close", self._usage_sink.close()
+        ):
+            return False
+        if not await best_effort("usage_database.close", _close_usage_database()):
             return False
         if not self._provider_manager_closed:
             self._provider_manager_closed = await best_effort(

@@ -12,11 +12,11 @@ from .record import (
 from .sink import NOOP_SINK, UsageSink, create_memory_sink
 
 __all__ = [
+    "NOOP_SINK",
+    "PRICE_TABLE",
     "FailureKind",
     "ModelPrice",
-    "NOOP_SINK",
     "OptimizationSaving",
-    "PRICE_TABLE",
     "PriceTable",
     "ProviderHealthSnapshot",
     "RequestOutcome",

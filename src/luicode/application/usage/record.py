@@ -1,11 +1,8 @@
 """Immutable usage records emitted by the observer and consumed by sinks."""
 
-from __future__ import annotations
-
 import json
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -135,7 +132,9 @@ class RequestUsage:
             attempt_count=row["attempt_count"],
             fallback_path=tuple(json.loads(row["fallback_path"] or "[]")),
             outcome=RequestOutcome(row["outcome"]),
-            failure_kind=FailureKind(row["failure_kind"]) if row["failure_kind"] else None,
+            failure_kind=FailureKind(row["failure_kind"])
+            if row["failure_kind"]
+            else None,
             status_code=row["status_code"],
             error_message=row["error_message"],
             cost_usd=row["cost_usd"],

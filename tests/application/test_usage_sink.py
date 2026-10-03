@@ -1,15 +1,11 @@
 """Tests for usage sink."""
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest
 
 from luicode.application.usage.record import (
-    FailureKind,
     OptimizationSaving,
-    RequestOutcome,
     RequestUsage,
 )
 from luicode.application.usage.sink import NOOP_SINK, create_memory_sink
@@ -82,7 +78,9 @@ async def test_memory_sink_flush():
     async def on_flush(reqs, opts):
         flushed.append((list(reqs), list(opts)))
 
-    sink = create_memory_sink(flush_interval_seconds=0.01, flush_batch_size=2, on_flush=on_flush)
+    sink = create_memory_sink(
+        flush_interval_seconds=0.01, flush_batch_size=2, on_flush=on_flush
+    )
 
     for i in range(3):
         record = RequestUsage(

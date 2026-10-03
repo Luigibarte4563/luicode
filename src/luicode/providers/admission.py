@@ -920,7 +920,7 @@ class ProviderAdmissionController:
                 current_episode = "probing"
             else:
                 current_episode = "recovering"
-        
+
         # Calculate success rate from recent trace events (simplified)
         # In a full implementation, this would track actual metrics
         return {
@@ -931,9 +931,15 @@ class ProviderAdmissionController:
             "p50_latency_ms": None,
             "p95_latency_ms": None,
             "current_episode": current_episode,
-            "last_error": str(episode.last_error) if episode and episode.last_error else None,
+            "last_error": str(episode.last_error)
+            if episode and episode.last_error
+            else None,
             "last_success_ms": None,
-            "rate_limit_remaining": max(0, self._proactive_limiter._rate_limit - len(self._proactive_limiter._times)),
+            "rate_limit_remaining": max(
+                0,
+                self._proactive_limiter._rate_limit
+                - len(self._proactive_limiter._times),
+            ),
             "rate_limit_reset_ms": None,
             "concurrency_used": self._max_attempts - self._concurrency_sem._value,
             "concurrency_limit": self._max_attempts,

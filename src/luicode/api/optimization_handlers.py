@@ -44,7 +44,9 @@ def _text_response(
 
 def _calculate_input_tokens(request_data: MessagesRequest) -> int:
     """Calculate actual input tokens for a request."""
-    return get_token_count(request_data.messages, request_data.system, request_data.tools)
+    return get_token_count(
+        request_data.messages, request_data.system, request_data.tools
+    )
 
 
 def _record_optimization_saved(
@@ -88,7 +90,9 @@ def try_prefix_detection(
     logger.info("Optimization: Fast prefix detection request")
     actual_input = _calculate_input_tokens(request_data)
     if request_id and provider_id and provider_model:
-        _record_optimization_saved(request_id, "prefix_detection", actual_input, provider_id, provider_model)
+        _record_optimization_saved(
+            request_id, "prefix_detection", actual_input, provider_id, provider_model
+        )
     return _text_response(
         request_data,
         extract_command_prefix(command),
@@ -114,7 +118,9 @@ def try_quota_mock(
     logger.info("Optimization: Intercepted and mocked quota probe")
     actual_input = _calculate_input_tokens(request_data)
     if request_id and provider_id and provider_model:
-        _record_optimization_saved(request_id, "quota_mock", actual_input, provider_id, provider_model)
+        _record_optimization_saved(
+            request_id, "quota_mock", actual_input, provider_id, provider_model
+        )
     return _text_response(
         request_data,
         "Quota check passed.",
@@ -140,7 +146,9 @@ def try_title_skip(
     logger.info("Optimization: Skipped title generation request")
     actual_input = _calculate_input_tokens(request_data)
     if request_id and provider_id and provider_model:
-        _record_optimization_saved(request_id, "title_skip", actual_input, provider_id, provider_model)
+        _record_optimization_saved(
+            request_id, "title_skip", actual_input, provider_id, provider_model
+        )
     return _text_response(
         request_data,
         "Conversation",
@@ -166,7 +174,9 @@ def try_suggestion_skip(
     logger.info("Optimization: Skipped suggestion mode request")
     actual_input = _calculate_input_tokens(request_data)
     if request_id and provider_id and provider_model:
-        _record_optimization_saved(request_id, "suggestion_skip", actual_input, provider_id, provider_model)
+        _record_optimization_saved(
+            request_id, "suggestion_skip", actual_input, provider_id, provider_model
+        )
     return _text_response(
         request_data,
         "",
@@ -195,7 +205,9 @@ def try_filepath_mock(
     logger.info("Optimization: Mocked filepath extraction")
     actual_input = _calculate_input_tokens(request_data)
     if request_id and provider_id and provider_model:
-        _record_optimization_saved(request_id, "filepath_mock", actual_input, provider_id, provider_model)
+        _record_optimization_saved(
+            request_id, "filepath_mock", actual_input, provider_id, provider_model
+        )
     return _text_response(
         request_data,
         filepaths,

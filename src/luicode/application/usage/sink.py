@@ -1,13 +1,11 @@
 """Usage sink protocol and in-memory implementation."""
 
-from __future__ import annotations
-
 import asyncio
-import time
 from collections import deque
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 from luicode.application.usage.record import OptimizationSaving, RequestUsage
 
@@ -18,7 +16,9 @@ class UsageSink(Protocol):
     def record_request(self, record: RequestUsage) -> None: ...
     def record_optimization(self, saving: OptimizationSaving) -> None: ...
     def snapshot_requests(self, limit: int = 1000) -> tuple[RequestUsage, ...]: ...
-    def snapshot_optimizations(self, limit: int = 1000) -> tuple[OptimizationSaving, ...]: ...
+    def snapshot_optimizations(
+        self, limit: int = 1000
+    ) -> tuple[OptimizationSaving, ...]: ...
     async def flush(self) -> None: ...
     async def close(self) -> None: ...
 
@@ -31,12 +31,16 @@ class _BufferedUsageSink:
     max_optimizations: int = 5000
     flush_interval_seconds: float = 1.0
     flush_batch_size: int = 50
-    on_flush: Callable[[list[RequestUsage], list[OptimizationSaving]], Any] | None = None
+    on_flush: Callable[[list[RequestUsage], list[OptimizationSaving]], Any] | None = (
+        None
+    )
 
     _requests: deque[RequestUsage] = field(default_factory=deque, init=False)
     _optimizations: deque[OptimizationSaving] = field(default_factory=deque, init=False)
     _pending_requests: list[RequestUsage] = field(default_factory=list, init=False)
-    _pending_optimizations: list[OptimizationSaving] = field(default_factory=list, init=False)
+    _pending_optimizations: list[OptimizationSaving] = field(
+        default_factory=list, init=False
+    )
     _flush_task: asyncio.Task[None] | None = field(default=None, init=False)
     _closed: bool = field(default=False, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
@@ -57,21 +61,22 @@ class _BufferedUsageSink:
     def snapshot_requests(self, limit: int = 1000) -> tuple[RequestUsage, ...]:
         return tuple(list(self._requests)[-limit:])
 
-    def snapshot_optimizations(self, limit: int = 1000) -> tuple[OptimizationSaving, ...]:
+    def snapshot_optimizations(
+        self, limit: int = 1000
+    ) -> tuple[OptimizationSaving, ...]:
         return tuple(list(self._optimizations)[-limit:])
 
     async def flush(self) -> None:
-        async with self._lock:
-            await self._drain_pending()
+        # _drain_pending acquires the lock itself. Holding it here as well would
+        # deadlock: asyncio.Lock is not reentrant.
+        await self._drain_pending()
 
     async def close(self) -> None:
         self._closed = True
         if self._flush_task:
             self._flush_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._flush_task
-            except asyncio.CancelledError:
-                pass
         await self.flush()
 
     async def _flush_loop(self) -> None:
@@ -97,11 +102,9 @@ class _BufferedUsageSink:
             self._pending_requests = self._pending_requests[len(reqs) :]
             self._pending_optimizations = self._pending_optimizations[len(opts) :]
         if self.on_flush and (reqs or opts):
-            try:
+            # Swallow - flush failures must never affect the request path
+            with suppress(Exception):
                 await self.on_flush(reqs, opts)
-            except Exception:
-                # Swallow - flush failures must not affect request path
-                pass
 
 
 def create_memory_sink(
@@ -110,7 +113,8 @@ def create_memory_sink(
     max_optimizations: int = 5000,
     flush_interval_seconds: float = 1.0,
     flush_batch_size: int = 50,
-    on_flush: Callable[[list[RequestUsage], list[OptimizationSaving]], Any] | None = None,
+    on_flush: Callable[[list[RequestUsage], list[OptimizationSaving]], Any]
+    | None = None,
 ) -> UsageSink:
     """Create an in-memory sink with optional async flush callback."""
     return _BufferedUsageSink(
@@ -134,7 +138,9 @@ class _NoOpSink:
     def snapshot_requests(self, limit: int = 1000) -> tuple[RequestUsage, ...]:
         return ()
 
-    def snapshot_optimizations(self, limit: int = 1000) -> tuple[OptimizationSaving, ...]:
+    def snapshot_optimizations(
+        self, limit: int = 1000
+    ) -> tuple[OptimizationSaving, ...]:
         return ()
 
     async def flush(self) -> None:

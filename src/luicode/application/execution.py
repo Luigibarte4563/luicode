@@ -75,7 +75,17 @@ class ProviderExecutor:
         self._log_raw_payloads = log_raw_payloads
         self._request_headers = MappingProxyType(dict(request_headers or {}))
         self._progress_timeout_seconds = float(progress_timeout_seconds)
-        self._usage_sink = usage_sink or create_memory_sink()
+        self._usage_sink = usage_sink
+
+    def _resolve_usage_sink(self) -> UsageSink:
+        """Return the sink, creating it on first use.
+
+        Construction schedules a flush task, so it must happen inside a running
+        event loop rather than in __init__.
+        """
+        if self._usage_sink is None:
+            self._usage_sink = create_memory_sink()
+        return self._usage_sink
 
     def _progress_timeout_failure(
         self,
@@ -170,12 +180,23 @@ class ProviderExecutor:
         headers = dict(self._request_headers)
         lowered = {k.lower(): v for k, v in headers.items() if isinstance(v, str)}
         # Check for known agent identifiers
-        for key in ("user-agent", "x-user-agent", "anthropic-version", "x-app", "x-client"):
+        for key in (
+            "user-agent",
+            "x-user-agent",
+            "anthropic-version",
+            "x-app",
+            "x-client",
+        ):
             val = lowered.get(key)
             if val:
                 return val[:100]
         # Fallback to session ID if available
-        for key in ("anthropic-session-id", "x-anthropic-session-id", "claude-session-id", "x-claude-session-id"):
+        for key in (
+            "anthropic-session-id",
+            "x-anthropic-session-id",
+            "claude-session-id",
+            "x-claude-session-id",
+        ):
             val = lowered.get(key)
             if val:
                 return f"session:{val[:50]}"
@@ -375,72 +396,77 @@ class ProviderExecutor:
                         # time is not spent waiting for a provider's startup task.
                         progress_deadline += monotonic() - opening_started
 
-                    if provider_stream is None and candidate_failure is None:
-                        raise TypeError(
-                            "provider stream method must return an async iterator"
+                    if provider_stream is None:
+                        if candidate_failure is None:
+                            raise TypeError(
+                                "provider stream method must return an async iterator"
+                            )
+                        # Candidate failed to open. Leave candidate_failure set and
+                        # fall through to the fallback decision below.
+                    else:
+                        # Wrap with usage observer for this candidate
+                        observer = UsageObserver(
+                            sink=self._resolve_usage_sink(),
+                            request_id=request_id,
+                            agent=agent,
+                            gateway_model=gateway_model,
+                            provider_id=target.provider_id,
+                            provider_model=target.provider_model,
+                            wire_api=wire_api,
+                            estimated_input_tokens=estimated_input_tokens,
+                            fallback_path=fallback_path,
+                            attempt_count=index + 1,
                         )
+                        observed_stream = observer.observe(provider_stream)
 
-                    # Wrap with usage observer for this candidate
-                    observer = UsageObserver(
-                        sink=self._usage_sink,
-                        request_id=request_id,
-                        agent=agent,
-                        gateway_model=gateway_model,
-                        provider_id=target.provider_id,
-                        provider_model=target.provider_model,
-                        wire_api=wire_api,
-                        estimated_input_tokens=estimated_input_tokens,
-                        fallback_path=fallback_path,
-                        attempt_count=index + 1,
-                    )
-                    observed_stream = observer.observe(provider_stream)
-
-                    while True:
-                        if loop.time() >= progress_deadline:
-                            raise self._progress_timeout_failure(
-                                request_id=request_id,
-                                provider_id=target.provider_id,
-                            )
-                        progress_timeout = asyncio.timeout_at(progress_deadline)
-                        read_failure: ExecutionFailure | None = None
-                        try:
-                            async with progress_timeout:
-                                try:
-                                    chunk = await anext(observed_stream)
-                                except ExecutionFailure as failure:
-                                    read_failure = failure
-                        except StopAsyncIteration:
-                            break
-                        except TimeoutError as exc:
-                            if not progress_timeout.expired():
-                                raise
-                            raise self._progress_timeout_failure(
-                                request_id=request_id,
-                                provider_id=target.provider_id,
-                            ) from exc
-                        if progress_timeout.expired():
-                            raise self._progress_timeout_failure(
-                                request_id=request_id,
-                                provider_id=target.provider_id,
-                            )
-                        if read_failure is not None:
-                            candidate_failure = read_failure
-                            break
-                        if not chunk:
-                            await asyncio.sleep(0)
-                            continue
-                        if not candidate_committed:
-                            candidate_committed = True
-                            if index > 0:
-                                self._trace_fallback_selected(
+                        while True:
+                            if loop.time() >= progress_deadline:
+                                raise self._progress_timeout_failure(
                                     request_id=request_id,
-                                    wire_api=wire_api,
-                                    selected=target,
-                                    candidate_index=index + 1,
-                                    candidate_count=len(candidates),
+                                    provider_id=target.provider_id,
                                 )
-                        yield chunk
-                        progress_deadline = loop.time() + self._progress_timeout_seconds
+                            progress_timeout = asyncio.timeout_at(progress_deadline)
+                            read_failure: ExecutionFailure | None = None
+                            try:
+                                async with progress_timeout:
+                                    try:
+                                        chunk = await anext(observed_stream)
+                                    except ExecutionFailure as failure:
+                                        read_failure = failure
+                            except StopAsyncIteration:
+                                break
+                            except TimeoutError as exc:
+                                if not progress_timeout.expired():
+                                    raise
+                                raise self._progress_timeout_failure(
+                                    request_id=request_id,
+                                    provider_id=target.provider_id,
+                                ) from exc
+                            if progress_timeout.expired():
+                                raise self._progress_timeout_failure(
+                                    request_id=request_id,
+                                    provider_id=target.provider_id,
+                                )
+                            if read_failure is not None:
+                                candidate_failure = read_failure
+                                break
+                            if not chunk:
+                                await asyncio.sleep(0)
+                                continue
+                            if not candidate_committed:
+                                candidate_committed = True
+                                if index > 0:
+                                    self._trace_fallback_selected(
+                                        request_id=request_id,
+                                        wire_api=wire_api,
+                                        selected=target,
+                                        candidate_index=index + 1,
+                                        candidate_count=len(candidates),
+                                    )
+                            yield chunk
+                            progress_deadline = (
+                                loop.time() + self._progress_timeout_seconds
+                            )
                 finally:
                     if provider_stream is not None:
                         active_error = sys.exception()

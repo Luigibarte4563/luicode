@@ -252,9 +252,16 @@
     `).join("");
   }
 
-  function escapeHtml(str) {
-    if (!str) return "";
-    return String(str).replace(/[&<>"']/g, c => ({ "&": "&", "<": "<", ">": ">", '"': """, "'": "'" }[c]));
+  const HTML_ESCAPES = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  };
+
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (character) => HTML_ESCAPES[character]);
   }
 
   // Expose to global for inline handlers

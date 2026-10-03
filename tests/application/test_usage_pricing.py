@@ -1,9 +1,5 @@
 """Tests for pricing lookup."""
 
-from __future__ import annotations
-
-import tempfile
-import tomli_w
 from pathlib import Path
 
 from luicode.application.usage.pricing import ModelPrice, PriceTable
@@ -58,7 +54,9 @@ def test_price_calculation():
     table._override.clear()
 
     # 1000 input + 500 output tokens at $3/$15 per M
-    cost, source = table.calculate_cost("anthropic", "claude-3-5-sonnet-20241022", 1000, 500)
+    cost, source = table.calculate_cost(
+        "anthropic", "claude-3-5-sonnet-20241022", 1000, 500
+    )
     assert cost is not None
     expected = (1000 * 3.0 + 500 * 15.0) / 1_000_000
     assert cost == round(expected, 8)
@@ -91,7 +89,6 @@ def test_price_calculation_unknown():
 
 def test_override_persistence(tmp_path: Path):
     """Test that user overrides work in memory."""
-    import os
     # Ensure clean state by removing override file
     override_path = config_dir_path() / "pricing.override.toml"
     if override_path.exists():
@@ -129,6 +126,7 @@ def test_override_persistence(tmp_path: Path):
     # Set override on top of bundled wildcard
     table.set_override("test_provider", "specific_model", 1.0, 2.0)
     price = table.get_price("test_provider", "specific_model")
+    assert price is not None
     assert price.input_per_million == 1.0
     assert price.source == "override"
 
@@ -143,7 +141,7 @@ def test_override_persistence(tmp_path: Path):
     # Remove non-existent
     removed = table.remove_override("test_provider", "test_model")
     assert removed is False
-    
+
     # Cleanup
     if override_path.exists():
         override_path.unlink()
@@ -158,6 +156,7 @@ def test_bundled_table_is_package_data():
         assert path.exists(), "pricing.toml must ship inside the package"
     # Verify the table actually loads through the package
     from luicode.application.usage.pricing import PRICE_TABLE
+
     assert PRICE_TABLE.get_price("anthropic", "claude-3-5-sonnet-20241022") is not None
 
 
