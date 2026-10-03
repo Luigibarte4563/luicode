@@ -296,7 +296,7 @@ async def my_handler(browser_tools: BrowserToolsPort):
 | Metric | Description |
 |--------|-------------|
 | **Token counts** | Input/output/cache tokens per request, provider, model, and agent |
-| **Cost estimation** | Bundled price table (config/pricing.toml) with user overrides (~/.luicode/pricing.override.toml) |
+| **Cost estimation** | Bundled price table (src/luicode/application/usage/data/pricing.toml) with user overrides (~/.luicode/pricing.override.toml) |
 | **Optimization savings** | Real token counts from intercepted requests (not hardcoded constants) |
 | **Time series** | Hourly buckets for requests, tokens, and cost (last 24h) |
 

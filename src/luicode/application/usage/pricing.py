@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import threading
 from dataclasses import dataclass
-from pathlib import Path
+from importlib import resources
 from typing import Any
 
-import tomli
-import tomli_w
+import tomllib
+import tomlkit
 
 from luicode.config.paths import config_dir_path
 
@@ -33,21 +32,22 @@ class PriceTable:
     def _load_bundled(self) -> None:
         if self._loaded:
             return
-        bundled_path = Path(__file__).parent.parent.parent.parent.parent / "config" / "pricing.toml"
-        if bundled_path.exists():
-            with open(bundled_path, "rb") as f:
-                data = tomli.load(f)
-            for provider, models in data.items():
-                if provider == "metadata":
-                    continue
-                self._bundled[provider] = {}
-                for model, prices in models.items():
-                    if isinstance(prices, dict) and "input" in prices and "output" in prices:
-                        self._bundled[provider][model] = ModelPrice(
-                            input_per_million=float(prices["input"]),
-                            output_per_million=float(prices["output"]),
-                            source="bundled",
-                        )
+        # Load from package data (shipped in wheel), not from repo root
+        asset = resources.files("luicode.application.usage").joinpath("data/pricing.toml")
+        with resources.as_file(asset) as path:
+            with path.open("rb") as f:
+                data = tomllib.load(f)
+        for provider, models in data.items():
+            if provider == "metadata":
+                continue
+            self._bundled[provider] = {}
+            for model, prices in models.items():
+                if isinstance(prices, dict) and "input" in prices and "output" in prices:
+                    self._bundled[provider][model] = ModelPrice(
+                        input_per_million=float(prices["input"]),
+                        output_per_million=float(prices["output"]),
+                        source="bundled",
+                    )
         self._load_override()
         self._loaded = True
 
@@ -56,7 +56,7 @@ class PriceTable:
         if override_path.exists():
             try:
                 with open(override_path, "rb") as f:
-                    data = tomli.load(f)
+                    data = tomllib.load(f)
                 for provider, models in data.items():
                     if provider == "metadata":
                         continue
@@ -154,8 +154,8 @@ class PriceTable:
                         "output": price.output_per_million,
                     }
             override_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(override_path, "wb") as f:
-                tomli_w.dump(data, f)
+            with open(override_path, "w", encoding="utf-8") as f:
+                f.write(tomlkit.dumps(data))
         except Exception:
             pass
 

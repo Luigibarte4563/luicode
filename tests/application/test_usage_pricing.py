@@ -149,6 +149,18 @@ def test_override_persistence(tmp_path: Path):
         override_path.unlink()
 
 
+def test_bundled_table_is_package_data():
+    """Guard the wheel-packaging bug: pricing.toml must live inside the package."""
+    from importlib import resources
+
+    asset = resources.files("luicode.application.usage").joinpath("data/pricing.toml")
+    with resources.as_file(asset) as path:
+        assert path.exists(), "pricing.toml must ship inside the package"
+    # Verify the table actually loads through the package
+    from luicode.application.usage.pricing import PRICE_TABLE
+    assert PRICE_TABLE.get_price("anthropic", "claude-3-5-sonnet-20241022") is not None
+
+
 def test_wildcard_pricing():
     """Test wildcard (*) pricing for provider."""
     table = PriceTable()

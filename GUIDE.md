@@ -207,7 +207,7 @@ Read-only health snapshot from each provider's admission controller:
 
 ### Price Table
 
-Bundled prices in `config/pricing.toml` (53+ providers). User overrides in `~/.luicode/pricing.override.toml` (same schema). Missing prices show as "—" (never $0.00 for paid models). Free/local providers explicitly priced at $0.
+Bundled prices in `src/luicode/application/usage/data/pricing.toml` (53+ providers). User overrides in `~/.luicode/pricing.override.toml` (same schema). Missing prices show as "—" (never $0.00 for paid models). Free/local providers explicitly priced at $0.
 
 ---
 
