@@ -217,15 +217,47 @@ class TermuxHarness:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def run(self, *args: str, fail_step: str = "") -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["/bin/sh", str(_repo_root() / "scripts" / "install.sh"), *args],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=self.env | {"FAIL_STEP": fail_step},
-            timeout=120,
+    def _timeout_report(self, error: subprocess.TimeoutExpired) -> AssertionError:
+        """Describe where the installer stalled, without raising the bare timeout.
+
+        ``install.sh`` narrates each phase, so its partial stdout names the last
+        step that started. The stub call log then shows which external commands
+        ran around it.
+        """
+        stdout = error.stdout or ""
+        stderr = error.stderr or ""
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", "replace")
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", "replace")
+        phases = [line for line in stdout.splitlines() if line.strip()]
+        last_phase = phases[-1] if phases else "<no output captured>"
+        recent_calls = self.calls()[-15:]
+        budget = f"{error.timeout:.0f}s" if error.timeout else "the configured"
+        return AssertionError(
+            f"install.sh exceeded {budget} budget.\n"
+            f"Last installer output: {last_phase}\n"
+            f"Recent stub invocations: {recent_calls}\n"
+            f"--- stdout ---\n{stdout}\n"
+            f"--- stderr ---\n{stderr}"
         )
+
+    def run(self, *args: str, fail_step: str = "") -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                ["/bin/sh", str(_repo_root() / "scripts" / "install.sh"), *args],
+                check=False,
+                capture_output=True,
+                text=True,
+                # The installer must never consume the harness' stdin. Leaving it
+                # inherited lets a pipeline block forever on CI, where stdin is an
+                # open pipe with no writer.
+                stdin=subprocess.DEVNULL,
+                env=self.env | {"FAIL_STEP": fail_step},
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise self._timeout_report(error) from error
 
     def src_dir(self) -> Path:
         return self.home / ".luicode-src"

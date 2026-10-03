@@ -1599,12 +1599,14 @@ termux_write_rc_block() {
 
     # Drop any previous managed block, keeping every other line untouched.
     if [ -e "$rc_target" ]; then
+        # stdin is closed explicitly: awk always reads the file operand, so an
+        # inherited stdin must never be able to block this step.
         awk -v begin="$PATH_MARKER_BEGIN" -v end="$PATH_MARKER_END" '
             $0 == begin { skipping = 1; next }
             skipping && $0 == end { skipping = 0; next }
             skipping { next }
             { print }
-        ' "$rc_target" > "$rc_temporary" ||
+        ' "$rc_target" > "$rc_temporary" < /dev/null ||
             fail "Could not rewrite $rc_target."
     else
         : > "$rc_temporary"
