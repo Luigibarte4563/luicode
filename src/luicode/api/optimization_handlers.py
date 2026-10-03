@@ -14,6 +14,7 @@ from luicode.core.anthropic import (
     MessagesResponse,
     Usage,
 )
+from luicode.core.anthropic.tokens import get_token_count
 
 from .command_utils import extract_command_prefix, extract_filepaths_from_command
 from .detection import (
@@ -41,8 +42,40 @@ def _text_response(
     )
 
 
+def _calculate_input_tokens(request_data: MessagesRequest) -> int:
+    """Calculate actual input tokens for a request."""
+    return get_token_count(request_data.messages, request_data.system, request_data.tools)
+
+
+def _record_optimization_saved(
+    request_id: str,
+    optimization: str,
+    saved_input_tokens: int,
+    provider_id: str,
+    provider_model: str,
+) -> None:
+    """Record optimization savings via trace. DB write happens via sink on request completion."""
+    from luicode.application.usage import PRICE_TABLE
+
+    cost_usd, cost_source = PRICE_TABLE.calculate_cost(
+        provider_id, provider_model, saved_input_tokens, 0
+    )
+    logger.trace(
+        "Optimization saved: {} tokens={} cost={} source={}",
+        optimization,
+        saved_input_tokens,
+        cost_usd,
+        cost_source,
+    )
+
+
 def try_prefix_detection(
-    request_data: MessagesRequest, settings: Settings
+    request_data: MessagesRequest,
+    settings: Settings,
+    *,
+    request_id: str = "",
+    provider_id: str = "",
+    provider_model: str = "",
 ) -> MessagesResponse | None:
     """Fast prefix detection - return command prefix without API call."""
     if not settings.fast_prefix_detection:
@@ -53,16 +86,24 @@ def try_prefix_detection(
         return None
 
     logger.info("Optimization: Fast prefix detection request")
+    actual_input = _calculate_input_tokens(request_data)
+    if request_id and provider_id and provider_model:
+        _record_optimization_saved(request_id, "prefix_detection", actual_input, provider_id, provider_model)
     return _text_response(
         request_data,
         extract_command_prefix(command),
-        input_tokens=100,
+        input_tokens=actual_input,
         output_tokens=5,
     )
 
 
 def try_quota_mock(
-    request_data: MessagesRequest, settings: Settings
+    request_data: MessagesRequest,
+    settings: Settings,
+    *,
+    request_id: str = "",
+    provider_id: str = "",
+    provider_model: str = "",
 ) -> MessagesResponse | None:
     """Mock quota probe requests."""
     if not settings.enable_network_probe_mock:
@@ -71,16 +112,24 @@ def try_quota_mock(
         return None
 
     logger.info("Optimization: Intercepted and mocked quota probe")
+    actual_input = _calculate_input_tokens(request_data)
+    if request_id and provider_id and provider_model:
+        _record_optimization_saved(request_id, "quota_mock", actual_input, provider_id, provider_model)
     return _text_response(
         request_data,
         "Quota check passed.",
-        input_tokens=10,
+        input_tokens=actual_input,
         output_tokens=5,
     )
 
 
 def try_title_skip(
-    request_data: MessagesRequest, settings: Settings
+    request_data: MessagesRequest,
+    settings: Settings,
+    *,
+    request_id: str = "",
+    provider_id: str = "",
+    provider_model: str = "",
 ) -> MessagesResponse | None:
     """Skip title generation requests."""
     if not settings.enable_title_generation_skip:
@@ -89,16 +138,24 @@ def try_title_skip(
         return None
 
     logger.info("Optimization: Skipped title generation request")
+    actual_input = _calculate_input_tokens(request_data)
+    if request_id and provider_id and provider_model:
+        _record_optimization_saved(request_id, "title_skip", actual_input, provider_id, provider_model)
     return _text_response(
         request_data,
         "Conversation",
-        input_tokens=100,
+        input_tokens=actual_input,
         output_tokens=5,
     )
 
 
 def try_suggestion_skip(
-    request_data: MessagesRequest, settings: Settings
+    request_data: MessagesRequest,
+    settings: Settings,
+    *,
+    request_id: str = "",
+    provider_id: str = "",
+    provider_model: str = "",
 ) -> MessagesResponse | None:
     """Skip suggestion mode requests."""
     if not settings.enable_suggestion_mode_skip:
@@ -107,16 +164,24 @@ def try_suggestion_skip(
         return None
 
     logger.info("Optimization: Skipped suggestion mode request")
+    actual_input = _calculate_input_tokens(request_data)
+    if request_id and provider_id and provider_model:
+        _record_optimization_saved(request_id, "suggestion_skip", actual_input, provider_id, provider_model)
     return _text_response(
         request_data,
         "",
-        input_tokens=100,
+        input_tokens=actual_input,
         output_tokens=1,
     )
 
 
 def try_filepath_mock(
-    request_data: MessagesRequest, settings: Settings
+    request_data: MessagesRequest,
+    settings: Settings,
+    *,
+    request_id: str = "",
+    provider_id: str = "",
+    provider_model: str = "",
 ) -> MessagesResponse | None:
     """Mock filepath extraction requests."""
     if not settings.enable_filepath_extraction_mock:
@@ -128,10 +193,13 @@ def try_filepath_mock(
 
     filepaths = extract_filepaths_from_command(cmd, output)
     logger.info("Optimization: Mocked filepath extraction")
+    actual_input = _calculate_input_tokens(request_data)
+    if request_id and provider_id and provider_model:
+        _record_optimization_saved(request_id, "filepath_mock", actual_input, provider_id, provider_model)
     return _text_response(
         request_data,
         filepaths,
-        input_tokens=100,
+        input_tokens=actual_input,
         output_tokens=10,
     )
 
@@ -151,10 +219,19 @@ def try_optimizations(
     settings: Settings,
     *,
     response_model: str | None = None,
+    request_id: str = "",
+    provider_id: str = "",
+    provider_model: str = "",
 ) -> MessagesResponse | None:
     """Run optimization handlers in order. Returns first match or None."""
     for handler in OPTIMIZATION_HANDLERS:
-        result = handler(request_data, settings)
+        result = handler(
+            request_data,
+            settings,
+            request_id=request_id,
+            provider_id=provider_id,
+            provider_model=provider_model,
+        )
         if result is not None:
             if response_model is None:
                 return result

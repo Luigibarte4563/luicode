@@ -19,6 +19,9 @@ LAUNCHER_TEMP_DIRNAME = "launchers"
 CODE_STATE_DIRNAME = "code"
 CODE_DATABASE_FILENAME = "code.db"
 CODE_LOCK_FILENAME = "code.lock"
+USAGE_STATE_DIRNAME = "usage"
+USAGE_DATABASE_FILENAME = "usage.db"
+USAGE_LOCK_FILENAME = "usage.lock"
 
 
 def config_dir_path() -> Path:
@@ -102,3 +105,13 @@ def openai_auth_lock_path() -> Path:
 def github_copilot_auth_path() -> Path:
     """Return LUICODE connection state; native Copilot retains credentials."""
     return config_dir_path() / AUTH_DIRNAME / "github_copilot.json"
+
+
+def usage_database_path() -> Path:
+    """Return the usage database path."""
+    return config_dir_path() / USAGE_STATE_DIRNAME / USAGE_DATABASE_FILENAME
+
+
+def usage_lock_path() -> Path:
+    """Return the usage database lock path."""
+    return config_dir_path() / USAGE_STATE_DIRNAME / USAGE_LOCK_FILENAME

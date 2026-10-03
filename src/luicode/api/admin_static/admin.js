@@ -49,6 +49,14 @@ const VIEW_GROUPS = [
     containerId: "messagingSections",
   },
   {
+    id: "usage",
+    label: "Usage",
+    title: "Usage Dashboard",
+    subtitle: "Token usage, costs, optimization savings, and provider health.",
+    sections: [],
+    containerId: "view-usage",
+  },
+  {
     id: "integrations",
     label: "Integrations",
     title: "Integrations",

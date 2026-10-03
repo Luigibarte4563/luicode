@@ -19,6 +19,7 @@ from luicode.application.errors import ApplicationError, InvalidRequestError
 from luicode.application.execution import ProviderExecutor
 from luicode.application.ports import ProviderResolver
 from luicode.application.routing import ModelRouter
+from luicode.application.usage import UsageSink
 from luicode.config.settings import Settings
 from luicode.core.diagnostics import safe_exception_message
 from luicode.core.failures import ExecutionFailure, find_execution_failure
@@ -43,6 +44,7 @@ class ResponsesHandler:
         provider_executor: ProviderExecutor | None = None,
         generation_id: int | None = None,
         request_headers: Mapping[str, str] | None = None,
+        usage_sink: UsageSink | None = None,
     ) -> None:
         self._settings = settings
         self._model_router = model_router or ModelRouter(settings)
@@ -52,6 +54,7 @@ class ResponsesHandler:
             generation_id=generation_id,
             log_raw_payloads=settings.log_raw_api_payloads,
             request_headers=request_headers,
+            usage_sink=usage_sink,
         )
 
     async def create(

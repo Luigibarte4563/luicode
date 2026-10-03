@@ -45,6 +45,10 @@ class BaseProvider(ABC):
     async def list_model_infos(self) -> frozenset[ProviderModelInfo]:
         """Return the model metadata currently advertised by this provider."""
 
+    def admission_controller(self) -> object | None:
+        """Return the provider's admission controller for health metrics, if available."""
+        return getattr(self, "_admission", None)
+
     @abstractmethod
     def stream_messages(
         self,

@@ -1,0 +1,214 @@
+# luicode bundled model pricing
+# Prices in USD per 1M tokens (input / output)
+# Sources: provider public pricing pages, OpenRouter model listings
+# Update with: uv run python -m luicode.config.update_pricing
+# User overrides go in ~/.luicode/pricing.override.toml (same schema)
+
+[metadata]
+version = 1
+updated = "2026-10-03"
+note = "Prices are best-effort snapshots. For authoritative pricing, check provider websites."
+
+# --- Anthropic ---
+[anthropic]
+"claude-opus-4-20250514" = { input = 15.00, output = 75.00 }
+"claude-sonnet-4-20250514" = { input = 3.00, output = 15.00 }
+"claude-3-5-sonnet-20241022" = { input = 3.00, output = 15.00 }
+"claude-3-5-haiku-20241022" = { input = 0.80, output = 4.00 }
+"claude-3-opus-20240229" = { input = 15.00, output = 75.00 }
+"claude-3-sonnet-20240229" = { input = 3.00, output = 15.00 }
+"claude-3-haiku-20240307" = { input = 0.25, output = 1.25 }
+
+# --- OpenAI ---
+[openai]
+"gpt-4o" = { input = 2.50, output = 10.00 }
+"gpt-4o-2024-08-06" = { input = 2.50, output = 10.00 }
+"gpt-4o-2024-05-13" = { input = 5.00, output = 15.00 }
+"gpt-4o-mini" = { input = 0.15, output = 0.60 }
+"gpt-4-turbo" = { input = 10.00, output = 30.00 }
+"gpt-4-turbo-2024-04-09" = { input = 10.00, output = 30.00 }
+"gpt-4" = { input = 30.00, output = 60.00 }
+"gpt-4-32k" = { input = 60.00, output = 120.00 }
+"gpt-3.5-turbo" = { input = 0.50, output = 1.50 }
+"gpt-3.5-turbo-0125" = { input = 0.50, output = 1.50 }
+"o1-preview" = { input = 15.00, output = 60.00 }
+"o1-mini" = { input = 3.00, output = 12.00 }
+"o1" = { input = 15.00, output = 60.00 }
+
+# --- Google ---
+[google]
+"gemini-1.5-pro" = { input = 1.25, output = 5.00 }
+"gemini-1.5-pro-002" = { input = 1.25, output = 5.00 }
+"gemini-1.5-flash" = { input = 0.075, output = 0.30 }
+"gemini-1.5-flash-002" = { input = 0.075, output = 0.30 }
+"gemini-2.0-flash-exp" = { input = 0.075, output = 0.30 }
+
+# --- xAI ---
+[xai]
+"grok-2" = { input = 2.00, output = 10.00 }
+"grok-2-1212" = { input = 2.00, output = 10.00 }
+"grok-beta" = { input = 2.00, output = 10.00 }
+"grok-vision-beta" = { input = 5.00, output = 15.00 }
+
+# --- Mistral ---
+[mistral]
+"mistral-large-2411" = { input = 2.00, output = 6.00 }
+"mistral-large-2407" = { input = 2.00, output = 6.00 }
+"mistral-small-2409" = { input = 0.20, output = 0.60 }
+"mistral-nemo-2407" = { input = 0.15, output = 0.15 }
+"codestral-2405" = { input = 0.20, output = 0.60 }
+"codestral-2501" = { input = 0.20, output = 0.60 }
+
+# --- DeepSeek ---
+[deepseek]
+"deepseek-chat" = { input = 0.14, output = 0.28 }
+"deepseek-coder" = { input = 0.14, output = 0.28 }
+"deepseek-v3" = { input = 0.27, output = 1.10 }
+"deepseek-r1" = { input = 0.55, output = 2.19 }
+
+# --- Cohere ---
+[cohere]
+"command-r-plus" = { input = 2.50, output = 10.00 }
+"command-r" = { input = 0.15, output = 0.60 }
+"command-r-08-2024" = { input = 0.15, output = 0.60 }
+
+# --- Meta / Llama (via providers like Together, Fireworks, etc.) ---
+# These are reference prices; actual cost depends on the inference provider
+[meta]
+"llama-3.1-405b" = { input = 2.70, output = 2.70 }
+"llama-3.1-70b" = { input = 0.88, output = 0.88 }
+"llama-3.1-8b" = { input = 0.18, output = 0.18 }
+"llama-3.2-90b-vision" = { input = 1.20, output = 1.20 }
+"llama-3.2-11b-vision" = { input = 0.18, output = 0.18 }
+"llama-3.2-3b" = { input = 0.06, output = 0.06 }
+"llama-3.2-1b" = { input = 0.04, output = 0.04 }
+"codellama-70b" = { input = 0.88, output = 0.88 }
+"codellama-34b" = { input = 0.55, output = 0.55 }
+"codellama-13b" = { input = 0.27, output = 0.27 }
+"codellama-7b" = { input = 0.20, output = 0.20 }
+
+# --- Qwen ---
+[qwen]
+"qwen-2.5-72b" = { input = 0.80, output = 0.80 }
+"qwen-2.5-32b" = { input = 0.50, output = 0.50 }
+"qwen-2.5-14b" = { input = 0.30, output = 0.30 }
+"qwen-2.5-7b" = { input = 0.15, output = 0.15 }
+"qwen-2.5-coder-32b" = { input = 0.50, output = 0.50 }
+"qwen-2.5-coder-14b" = { input = 0.30, output = 0.30 }
+"qwen-2.5-coder-7b" = { input = 0.15, output = 0.15 }
+"qwen-2.5-coder-3b" = { input = 0.08, output = 0.08 }
+"qwen-2.5-coder-1.5b" = { input = 0.05, output = 0.05 }
+"qwen2.5-vl-72b" = { input = 1.20, output = 1.20 }
+"qwen2.5-vl-7b" = { input = 0.15, output = 0.15 }
+
+# --- OpenRouter (aggregator) - some models have special pricing ---
+[openrouter]
+"anthropic/claude-3.5-sonnet" = { input = 3.00, output = 15.00 }
+"anthropic/claude-3.5-haiku" = { input = 0.80, output = 4.00 }
+"openai/gpt-4o" = { input = 2.50, output = 10.00 }
+"openai/gpt-4o-mini" = { input = 0.15, output = 0.60 }
+"google/gemini-pro-1.5" = { input = 1.25, output = 5.00 }
+"google/gemini-flash-1.5" = { input = 0.075, output = 0.30 }
+"x-ai/grok-2" = { input = 2.00, output = 10.00 }
+"mistralai/mistral-large" = { input = 2.00, output = 6.00 }
+"mistralai/codestral" = { input = 0.20, output = 0.60 }
+"deepseek/deepseek-chat" = { input = 0.14, output = 0.28 }
+"deepseek/deepseek-r1" = { input = 0.55, output = 2.19 }
+"meta-llama/llama-3.1-405b" = { input = 2.70, output = 2.70 }
+"meta-llama/llama-3.1-70b" = { input = 0.88, output = 0.88 }
+"meta-llama/llama-3.1-8b" = { input = 0.18, output = 0.18 }
+"qwen/qwen-2.5-72b" = { input = 0.80, output = 0.80 }
+"qwen/qwen-2.5-coder-32b" = { input = 0.50, output = 0.50 }
+
+# --- Together AI ---
+[together]
+"meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo" = { input = 3.50, output = 3.50 }
+"meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo" = { input = 0.88, output = 0.88 }
+"meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo" = { input = 0.18, output = 0.18 }
+"mistralai/Mixtral-8x7B-Instruct-v0.1" = { input = 0.60, output = 0.60 }
+"mistralai/Mistral-7B-Instruct-v0.3" = { input = 0.15, output = 0.15 }
+"Qwen/Qwen2.5-72B-Instruct" = { input = 0.80, output = 0.80 }
+"Qwen/Qwen2.5-Coder-32B-Instruct" = { input = 0.50, output = 0.50 }
+"deepseek-ai/DeepSeek-V3" = { input = 0.27, output = 1.10 }
+"deepseek-ai/DeepSeek-R1" = { input = 0.55, output = 2.19 }
+
+# --- Fireworks AI ---
+[fireworks]
+"accounts/fireworks/models/llama-v3p1-405b-instruct" = { input = 3.00, output = 3.00 }
+"accounts/fireworks/models/llama-v3p1-70b-instruct" = { input = 0.90, output = 0.90 }
+"accounts/fireworks/models/llama-v3p1-8b-instruct" = { input = 0.20, output = 0.20 }
+"accounts/fireworks/models/mixtral-8x7b-instruct" = { input = 0.50, output = 0.50 }
+"accounts/fireworks/models/qwen-2p5-72b-instruct" = { input = 0.90, output = 0.90 }
+"accounts/fireworks/models/qwen-2p5-coder-32b-instruct" = { input = 0.50, output = 0.50 }
+"accounts/fireworks/models/deepseek-v3" = { input = 0.30, output = 1.20 }
+"accounts/fireworks/models/deepseek-r1" = { input = 0.60, output = 2.40 }
+
+# --- Groq (free tier has limits, paid is per-token) ---
+[groq]
+"llama-3.1-405b-reasoning" = { input = 0.59, output = 0.79 }
+"llama-3.1-70b-versatile" = { input = 0.59, output = 0.79 }
+"llama-3.1-8b-instant" = { input = 0.05, output = 0.08 }
+"mixtral-8x7b-32768" = { input = 0.24, output = 0.24 }
+"gemma2-9b-it" = { input = 0.20, output = 0.20 }
+"qwen-2.5-72b" = { input = 0.79, output = 0.79 }
+"qwen-2.5-coder-32b" = { input = 0.59, output = 0.79 }
+
+# --- Cerebras (free tier, paid per-token) ---
+[cerebras]
+"llama3.1-8b" = { input = 0.10, output = 0.10 }
+"llama3.1-70b" = { input = 0.60, output = 0.60 }
+"qwen2.5-7b" = { input = 0.10, output = 0.10 }
+"qwen2.5-32b" = { input = 0.30, output = 0.30 }
+
+# --- NVIDIA NIM ---
+[nvidia]
+"nvidia/nemotron-3-ultra" = { input = 0.50, output = 1.50 }
+"nvidia/nemotron-4-340b" = { input = 1.00, output = 3.00 }
+"meta/llama-3.1-405b" = { input = 2.70, output = 2.70 }
+"meta/llama-3.1-70b" = { input = 0.88, output = 0.88 }
+"meta/llama-3.1-8b" = { input = 0.18, output = 0.18 }
+
+# --- Perplexity (Sonar) ---
+[perplexity]
+"sonar-small-online" = { input = 1.00, output = 1.00 }
+"sonar-medium-online" = { input = 1.00, output = 1.00 }
+"sonar-large-online" = { input = 1.00, output = 1.00 }
+"sonar-huge-online" = { input = 1.00, output = 1.00 }
+
+# --- Amazon Bedrock (per-region, these are us-east-1 on-demand) ---
+[bedrock]
+"anthropic.claude-3-5-sonnet-20241022-v2:0" = { input = 3.00, output = 15.00 }
+"anthropic.claude-3-5-haiku-20241022-v1:0" = { input = 0.80, output = 4.00 }
+"anthropic.claude-3-opus-20240229-v1:0" = { input = 15.00, output = 75.00 }
+"anthropic.claude-3-sonnet-20240229-v1:0" = { input = 3.00, output = 15.00 }
+"anthropic.claude-3-haiku-20240307-v1:0" = { input = 0.25, output = 1.25 }
+"meta.llama3-1-405b-instruct-v1:0" = { input = 3.00, output = 3.00 }
+"meta.llama3-1-70b-instruct-v1:0" = { input = 0.93, output = 0.93 }
+"meta.llama3-1-8b-instruct-v1:0" = { input = 0.16, output = 0.16 }
+"mistral.mistral-large-2407-v1:0" = { input = 2.00, output = 6.00 }
+"mistral.mistral-small-2409-v1:0" = { input = 0.20, output = 0.60 }
+"cohere.command-r-plus-v1:0" = { input = 2.50, output = 10.00 }
+"cohere.command-r-v1:0" = { input = 0.15, output = 0.60 }
+"amazon.nova-pro-v1:0" = { input = 0.80, output = 3.20 }
+"amazon.nova-lite-v1:0" = { input = 0.06, output = 0.24 }
+"amazon.nova-micro-v1:0" = { input = 0.035, output = 0.14 }
+
+# --- Azure OpenAI ---
+[azure]
+"gpt-4o" = { input = 2.50, output = 10.00 }
+"gpt-4o-mini" = { input = 0.15, output = 0.60 }
+"gpt-4-turbo" = { input = 10.00, output = 30.00 }
+"gpt-35-turbo" = { input = 0.50, output = 1.50 }
+"o1-preview" = { input = 15.00, output = 60.00 }
+"o1-mini" = { input = 3.00, output = 12.00 }
+
+# --- Local / Free (cost = 0) ---
+# These are local models or free tiers; cost is effectively $0
+[ollama]
+"*" = { input = 0.0, output = 0.0 }
+
+[lmstudio]
+"*" = { input = 0.0, output = 0.0 }
+
+[llamacpp]
+"*" = { input = 0.0, output = 0.0 }

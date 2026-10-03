@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/admin/assets/__LUICODE_VERSION__/admin.css" />
     <link rel="stylesheet" href="/admin/assets/__LUICODE_VERSION__/code_sessions.css" />
     <link rel="stylesheet" href="/admin/assets/__LUICODE_VERSION__/session_layout.css" />
+    <link rel="stylesheet" href="/admin/assets/__LUICODE_VERSION__/usage.css" />
   </head>
   <body>
     <div class="app-shell">
@@ -157,6 +158,173 @@
             </dialog>
           </section>
 
+          <section id="view-usage" class="admin-view" data-view="usage" hidden>
+            <header class="topbar">
+              <div class="page-heading">
+                <h2>Usage Dashboard</h2>
+              </div>
+              <div class="usage-filters">
+                <label>Since: <select id="usageSinceHours" onchange="loadSummary(); loadRequests(0);">
+                  <option value="1">Last hour</option>
+                  <option value="6">Last 6 hours</option>
+                  <option value="24" selected>Last 24 hours</option>
+                  <option value="168">Last 7 days</option>
+                  <option value="720">Last 30 days</option>
+                </select></label>
+              </div>
+            </header>
+
+            <div class="usage-grid">
+              <div class="usage-stat">
+                <div class="usage-stat-label">Total Requests</div>
+                <div class="usage-stat-value requests" id="totalRequests">—</div>
+              </div>
+              <div class="usage-stat">
+                <div class="usage-stat-label">Input Tokens</div>
+                <div class="usage-stat-value tokens" id="totalInputTokens">—</div>
+              </div>
+              <div class="usage-stat">
+                <div class="usage-stat-label">Output Tokens</div>
+                <div class="usage-stat-value tokens" id="totalOutputTokens">—</div>
+              </div>
+              <div class="usage-stat">
+                <div class="usage-stat-label">Total Tokens</div>
+                <div class="usage-stat-value tokens" id="totalTokens">—</div>
+              </div>
+              <div class="usage-stat">
+                <div class="usage-stat-label">Estimated Cost</div>
+                <div class="usage-stat-value cost" id="totalCost">—</div>
+              </div>
+              <div class="usage-stat">
+                <div class="usage-stat-label">Providers Used</div>
+                <div class="usage-stat-value" id="providersUsed">—</div>
+              </div>
+              <div class="usage-stat">
+                <div class="usage-stat-label">Agents</div>
+                <div class="usage-stat-value" id="agentsUsed">—</div>
+              </div>
+            </div>
+
+            <div class="section-tabs" role="tablist">
+              <button class="section-tab active" role="tab" data-panel="overview" onclick="showPanel('overview')">Overview</button>
+              <button class="section-tab" role="tab" data-panel="requests" onclick="showPanel('requests')">Request Log</button>
+              <button class="section-tab" role="tab" data-panel="providers" onclick="showPanel('providers')">By Provider</button>
+              <button class="section-tab" role="tab" data-panel="agents" onclick="showPanel('agents')">By Agent</button>
+              <button class="section-tab" role="tab" data-panel="optimizations" onclick="showPanel('optimizations')">Optimizations</button>
+              <button class="section-tab" role="tab" data-panel="health" onclick="showPanel('health')">Provider Health</button>
+            </div>
+
+            <div id="panel-overview" class="section-panel active" role="tabpanel">
+              <div class="usage-chart-container">
+                <canvas id="usageChart" aria-label="Usage over time"></canvas>
+              </div>
+            </div>
+
+            <div id="panel-requests" class="section-panel" role="tabpanel">
+              <div class="usage-filters">
+                <label>Provider: <select id="filterProvider"><option value="">All</option></select></label>
+                <label>Agent: <select id="filterAgent"><option value="">All</option></select></label>
+                <label>Outcome: <select id="filterOutcome"><option value="">All</option></select></label>
+              </div>
+              <div class="usage-table-container">
+                <table class="usage-table">
+                  <thead>
+                    <tr>
+                      <th>Request ID</th>
+                      <th>Time</th>
+                      <th>Agent</th>
+                      <th>Gateway Model</th>
+                      <th>Provider / Model</th>
+                      <th class="text-right">Input</th>
+                      <th class="text-right">Output</th>
+                      <th class="text-right">Cost</th>
+                      <th class="text-right">Latency</th>
+                      <th class="text-right">TTFB</th>
+                      <th>Outcome</th>
+                      <th class="text-right">Attempts</th>
+                      <th>Fallback Path</th>
+                    </tr>
+                  </thead>
+                  <tbody id="requestsTableBody"></tbody>
+                </table>
+              </div>
+              <div class="usage-pagination" id="requestsPagination"></div>
+            </div>
+
+            <div id="panel-providers" class="section-panel" role="tabpanel">
+              <div class="usage-table-container">
+                <table class="usage-table">
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th>Model</th>
+                      <th class="text-right">Requests</th>
+                      <th class="text-right">Input</th>
+                      <th class="text-right">Output</th>
+                      <th class="text-right">Cost</th>
+                      <th class="text-right">Avg Latency</th>
+                    </tr>
+                  </thead>
+                  <tbody id="providersTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="panel-agents" class="section-panel" role="tabpanel">
+              <div class="usage-table-container">
+                <table class="usage-table">
+                  <thead>
+                    <tr>
+                      <th>Agent</th>
+                      <th class="text-right">Requests</th>
+                      <th class="text-right">Input</th>
+                      <th class="text-right">Output</th>
+                      <th class="text-right">Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody id="agentsTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="panel-optimizations" class="section-panel" role="tabpanel">
+              <div class="usage-table-container">
+                <table class="usage-table">
+                  <thead>
+                    <tr>
+                      <th>Optimization</th>
+                      <th class="text-right">Count</th>
+                      <th class="text-right">Saved Input</th>
+                      <th class="text-right">Saved Output</th>
+                      <th class="text-right">Saved Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody id="optimizationsTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="panel-health" class="section-panel" role="tabpanel">
+              <div class="usage-table-container">
+                <table class="usage-table">
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th>Status</th>
+                      <th>Episode</th>
+                      <th class="text-right">Success Rate</th>
+                      <th class="text-right">P50 Latency</th>
+                      <th class="text-right">P95 Latency</th>
+                      <th class="text-right">Rate Limit Remaining</th>
+                      <th>Last Error</th>
+                    </tr>
+                  </thead>
+                  <tbody id="healthTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
           <section id="view-code" class="admin-view" data-view="code" hidden>
             <div id="codeRoot" class="code-root session-root" aria-live="off"></div>
           </section>
@@ -190,10 +358,12 @@
         <button id="saveProvider" class="primary-button" type="button" disabled>Save</button>
       </div>
     </dialog>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/form_controls.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/model_combobox.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/session_ui.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/code_sessions.js"></script>
+    <script src="/admin/assets/__LUICODE_VERSION__/usage.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/admin.js"></script>
   </body>
 </html>

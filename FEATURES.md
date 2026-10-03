@@ -259,12 +259,13 @@ async def my_handler(browser_tools: BrowserToolsPort):
 
 ## Admin UI Features
 
-### Navigation (5 Views)
+### Navigation (6 Views)
 | View | Path | Purpose |
 |------|------|---------|
 | **Providers** | `/admin` | Configure cloud, local, OAuth providers |
 | **Model Config** | `/admin/model_config` | Select models, reasoning, web tools |
 | **Messaging** | `/admin/messaging` | Discord, Telegram, Voice |
+| **Usage** | `/admin/usage` | Token usage, costs, optimization savings, provider health |
 | **Integrations** | `/admin/integrations` | VS Code, JetBrains, Claude Desktop |
 | **Code Sessions** | `/admin/code` | Browse, search, manage sessions |
 
@@ -286,6 +287,35 @@ async def my_handler(browser_tools: BrowserToolsPort):
 - **Hot-reload** — Applies without restart when possible
 - **Restart handling** — Auto-reconnect or manual "Reconnect" button
 - **Pending restart banner** — Shows which fields require restart
+
+---
+
+## Usage Dashboard
+
+### Overview
+| Metric | Description |
+|--------|-------------|
+| **Token counts** | Input/output/cache tokens per request, provider, model, and agent |
+| **Cost estimation** | Bundled price table (config/pricing.toml) with user overrides (~/.luicode/pricing.override.toml) |
+| **Optimization savings** | Real token counts from intercepted requests (not hardcoded constants) |
+| **Time series** | Hourly buckets for requests, tokens, and cost (last 24h) |
+
+### Request Log
+- **Searchable & paginated** — Filter by provider, agent, outcome, time range
+- **Per-request details** — Request ID, latency, TTFB, fallback chain, attempt count
+- **Cost per request** — NULL when price unknown, never shows $0.00 for paid models
+- **Redacted by default** — Payload content not stored; opt-in for debug
+
+### Provider Health
+- **Circuit breaker state** — Idle / Probing / Recovering / Quarantined
+- **Rate limit headroom** — Remaining tokens from sliding window
+- **Concurrency usage** — Active vs max slots
+- **Last error** — Truncated error message for quick triage
+
+### Data Retention
+- **SQLite storage** — ~/.luicode/usage/usage.db (WAL mode, separate from code.db)
+- **Default retention** — 90 days or 100k rows, configurable
+- **Background writer** — Batched flush every ~1s, never blocks request path
 
 ---
 
