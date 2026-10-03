@@ -12,6 +12,7 @@ from luicode.application.connected_accounts import (
 )
 from luicode.application.model_metadata import ProviderModelRefreshResult
 from luicode.application.ports import RequestRuntimePort, TaskController
+from luicode.application.usage import UsageSink
 from luicode.application.web_tools.ports import WebToolsPort
 from luicode.config.admin.state import ConfigInputValue, ValueState
 from luicode.core.json_types import JsonObject
@@ -85,6 +86,30 @@ class AdminRuntimePort(Protocol):
     async def disconnect_connected_account(
         self, provider_id: str
     ) -> ConnectedAccountStatus: ...
+
+    @property
+    def usage_sink(self) -> UsageSink: ...
+
+    async def usage_summary(self, since_hours: int) -> JsonObject: ...
+
+    async def usage_requests(
+        self,
+        *,
+        since_hours: int,
+        limit: int,
+        offset: int,
+        provider_id: str | None,
+        agent: str | None,
+        outcome: str | None,
+    ) -> JsonObject: ...
+
+    async def usage_optimizations(
+        self,
+        *,
+        since_hours: int,
+        limit: int,
+        optimization: str | None,
+    ) -> JsonObject: ...
 
 
 @dataclass(frozen=True, slots=True)

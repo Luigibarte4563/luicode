@@ -132,6 +132,17 @@ class ProviderDescriptor:
             return (self.base_url_attr,)
         return ()
 
+    def is_configured(self, settings: object) -> bool:
+        """Return whether every setting that configures this provider is present.
+
+        ``settings`` is duck-typed on ``getattr`` so this module stays free of any
+        dependency on :mod:`luicode.config.settings`.
+        """
+        attrs = self.configuration_attrs()
+        if attrs:
+            return all(getattr(settings, attr, None) for attr in attrs)
+        return self.static_credential is not None
+
 
 PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
     "nvidia_nim": ProviderDescriptor(

@@ -1,15 +1,12 @@
 """Pricing lookup from bundled table + user override."""
 
-from __future__ import annotations
-
-import os
 import threading
+import tomllib
 from dataclasses import dataclass
-from pathlib import Path
+from importlib import resources
 from typing import Any
 
-import tomli
-import tomli_w
+import tomlkit
 
 from luicode.config.paths import config_dir_path
 
@@ -33,21 +30,27 @@ class PriceTable:
     def _load_bundled(self) -> None:
         if self._loaded:
             return
-        bundled_path = Path(__file__).parent.parent.parent.parent.parent / "config" / "pricing.toml"
-        if bundled_path.exists():
-            with open(bundled_path, "rb") as f:
-                data = tomli.load(f)
-            for provider, models in data.items():
-                if provider == "metadata":
-                    continue
-                self._bundled[provider] = {}
-                for model, prices in models.items():
-                    if isinstance(prices, dict) and "input" in prices and "output" in prices:
-                        self._bundled[provider][model] = ModelPrice(
-                            input_per_million=float(prices["input"]),
-                            output_per_million=float(prices["output"]),
-                            source="bundled",
-                        )
+        # Load from package data (shipped in wheel), not from repo root
+        asset = resources.files("luicode.application.usage").joinpath(
+            "data/pricing.toml"
+        )
+        with resources.as_file(asset) as path, path.open("rb") as f:
+            data = tomllib.load(f)
+        for provider, models in data.items():
+            if provider == "metadata":
+                continue
+            self._bundled[provider] = {}
+            for model, prices in models.items():
+                if (
+                    isinstance(prices, dict)
+                    and "input" in prices
+                    and "output" in prices
+                ):
+                    self._bundled[provider][model] = ModelPrice(
+                        input_per_million=float(prices["input"]),
+                        output_per_million=float(prices["output"]),
+                        source="bundled",
+                    )
         self._load_override()
         self._loaded = True
 
@@ -56,13 +59,17 @@ class PriceTable:
         if override_path.exists():
             try:
                 with open(override_path, "rb") as f:
-                    data = tomli.load(f)
+                    data = tomllib.load(f)
                 for provider, models in data.items():
                     if provider == "metadata":
                         continue
                     self._override[provider] = {}
                     for model, prices in models.items():
-                        if isinstance(prices, dict) and "input" in prices and "output" in prices:
+                        if (
+                            isinstance(prices, dict)
+                            and "input" in prices
+                            and "output" in prices
+                        ):
                             self._override[provider][model] = ModelPrice(
                                 input_per_million=float(prices["input"]),
                                 output_per_million=float(prices["output"]),
@@ -76,7 +83,10 @@ class PriceTable:
         self._load_bundled()
         with self._lock:
             # Try exact match in override
-            if provider_id in self._override and model_id in self._override[provider_id]:
+            if (
+                provider_id in self._override
+                and model_id in self._override[provider_id]
+            ):
                 return self._override[provider_id][model_id]
             # Try exact match in bundled
             if provider_id in self._bundled and model_id in self._bundled[provider_id]:
@@ -87,7 +97,14 @@ class PriceTable:
             if provider_id in self._bundled and "*" in self._bundled[provider_id]:
                 return self._bundled[provider_id]["*"]
             # Try OpenRouter-style prefix matching
-            for prefixed_provider in ("openrouter", "together", "fireworks", "nvidia", "azure", "bedrock"):
+            for prefixed_provider in (
+                "openrouter",
+                "together",
+                "fireworks",
+                "nvidia",
+                "azure",
+                "bedrock",
+            ):
                 if provider_id == prefixed_provider:
                     # Models from these providers often have full paths
                     for key, price in self._bundled.get(prefixed_provider, {}).items():
@@ -108,10 +125,15 @@ class PriceTable:
             return None, "unknown"
         if price.input_per_million == 0 and price.output_per_million == 0:
             return 0.0, price.source
-        cost = (input_tokens * price.input_per_million + output_tokens * price.output_per_million) / 1_000_000
+        cost = (
+            input_tokens * price.input_per_million
+            + output_tokens * price.output_per_million
+        ) / 1_000_000
         return round(cost, 8), price.source
 
-    def set_override(self, provider_id: str, model_id: str, input_price: float, output_price: float) -> None:
+    def set_override(
+        self, provider_id: str, model_id: str, input_price: float, output_price: float
+    ) -> None:
         """Set a user override price and persist to disk."""
         self._load_bundled()
         with self._lock:
@@ -128,7 +150,10 @@ class PriceTable:
         """Remove a user override. Returns True if one existed."""
         self._load_bundled()
         with self._lock:
-            if provider_id in self._override and model_id in self._override[provider_id]:
+            if (
+                provider_id in self._override
+                and model_id in self._override[provider_id]
+            ):
                 del self._override[provider_id][model_id]
                 if not self._override[provider_id]:
                     del self._override[provider_id]
@@ -154,8 +179,8 @@ class PriceTable:
                         "output": price.output_per_million,
                     }
             override_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(override_path, "wb") as f:
-                tomli_w.dump(data, f)
+            with open(override_path, "w", encoding="utf-8") as f:
+                f.write(tomlkit.dumps(data))
         except Exception:
             pass
 

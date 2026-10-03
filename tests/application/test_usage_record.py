@@ -1,9 +1,5 @@
 """Tests for usage record dataclasses."""
 
-from __future__ import annotations
-
-import json
-
 from luicode.application.usage.record import (
     FailureKind,
     OptimizationSaving,
