@@ -1599,14 +1599,24 @@ termux_write_rc_block() {
 
     # Drop any previous managed block, keeping every other line untouched.
     if [ -e "$rc_target" ]; then
-        # stdin is closed explicitly: awk always reads the file operand, so an
-        # inherited stdin must never be able to block this step.
-        awk -v begin="$PATH_MARKER_BEGIN" -v end="$PATH_MARKER_END" '
-            $0 == begin { skipping = 1; next }
-            skipping && $0 == end { skipping = 0; next }
-            skipping { next }
-            { print }
-        ' "$rc_target" > "$rc_temporary" < /dev/null ||
+        # Pure shell implementation: filter out the managed block between markers.
+        # This avoids any dependency on awk and potential stdin/stdout issues
+        # with subprocess wrappers in test environments.
+        skipping=0
+        while IFS= read -r line; do
+            if [ "$line" = "$PATH_MARKER_BEGIN" ]; then
+                skipping=1
+                continue
+            fi
+            if [ "$line" = "$PATH_MARKER_END" ]; then
+                skipping=0
+                continue
+            fi
+            if [ "$skipping" = 1 ]; then
+                continue
+            fi
+            printf '%s\n' "$line"
+        done < "$rc_target" > "$rc_temporary" ||
             fail "Could not rewrite $rc_target."
     else
         : > "$rc_temporary"

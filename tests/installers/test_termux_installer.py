@@ -220,7 +220,7 @@ class TermuxHarness:
     def _timeout_report(self, error: subprocess.TimeoutExpired) -> AssertionError:
         """Describe where the installer stalled, without raising the bare timeout.
 
-        ``install.sh`` narrates each phase, so its partial stdout names the last
+        ``install.sh`` narrates each phase, so its partial stdout/stderr names the last
         step that started. The stub call log then shows which external commands
         ran around it.
         """
@@ -230,8 +230,10 @@ class TermuxHarness:
             stdout = stdout.decode("utf-8", "replace")
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", "replace")
-        phases = [line for line in stdout.splitlines() if line.strip()]
-        last_phase = phases[-1] if phases else "<no output captured>"
+        # Capture step/fail output from both streams (they write to stderr)
+        all_lines = [line for line in stdout.splitlines() if line.strip()]
+        all_lines += [line for line in stderr.splitlines() if line.strip()]
+        last_phase = all_lines[-1] if all_lines else "<no output captured>"
         recent_calls = self.calls()[-15:]
         budget = f"{error.timeout:.0f}s" if error.timeout else "the configured"
         return AssertionError(
