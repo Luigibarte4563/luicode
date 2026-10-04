@@ -5,9 +5,12 @@ interpreter, and git so the Android flow is covered on any POSIX host. The
 Linux/macOS uv tool flow has its own coverage in test_installers.py.
 """
 
+import contextlib
 import os
 import shutil
+import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,6 +18,13 @@ import pytest
 
 LUICODE_TERMUX_COMMANDS = ("luicode", "luicode-server")
 REPO_URL = "https://github.com/Luigibarte4563/luicode.git"
+# The installer runs against stubs, so the budget only has to cover process
+# startup. It is deliberately not generous: a real stall must surface here
+# rather than being absorbed by a larger number.
+INSTALL_TIMEOUT_SECONDS = 120
+# Reaping a killed session should be immediate; this only bounds the case where
+# something refuses to die so a timeout report can never hang the suite itself.
+TIMEOUT_DRAIN_SECONDS = 30
 # Everything the Termux path shells out to besides the stubs it provisions.
 HERMETIC_TOOLS = (
     "awk",
@@ -28,6 +38,7 @@ HERMETIC_TOOLS = (
     "ps",
     "rm",
     "sed",
+    "sort",
     "uname",
 )
 
@@ -40,6 +51,123 @@ def _write_executable(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     path.chmod(0o755)
+
+
+def _as_text(stream: str | bytes | None) -> str:
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", "replace")
+    return stream or ""
+
+
+def _proc_fields(pid: int) -> tuple[str, str] | None:
+    """Return (state, pgrp) from ``/proc/<pid>/stat``.
+
+    The comm field is parenthesised and may itself contain spaces and
+    parentheses, so only the text after the final ")" can be split reliably.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    closing = raw.rfind(")")
+    if closing == -1:
+        return None
+    fields = raw[closing + 2 :].split()
+    # fields[0] is the state character, fields[2] is the process group id.
+    if len(fields) < 3:
+        return None
+    return fields[0], fields[2]
+
+
+def _proc_process_line(pid: int) -> str:
+    """Describe one process, including the kernel function it is parked in."""
+    try:
+        cmdline = (
+            Path(f"/proc/{pid}/cmdline")
+            .read_bytes()
+            .replace(b"\0", b" ")
+            .decode("utf-8", "replace")
+            .strip()
+        )
+    except OSError:
+        cmdline = ""
+    try:
+        wchan = Path(f"/proc/{pid}/wchan").read_text(encoding="utf-8").strip()
+    except OSError:
+        wchan = ""
+    fields = _proc_fields(pid)
+    state, pgrp = fields if fields else ("?", "?")
+    return (
+        f"  pid={pid} pgrp={pgrp} state={state} "
+        f"wchan={wchan or 'unavailable'} cmd={cmdline or 'unavailable'}"
+    )
+
+
+def _ps_process_lines(pid: int) -> list[str]:
+    """List the installer's process group via ps, for hosts without /proc."""
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,pgid=,state=,wchan=,command="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_DRAIN_SECONDS,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return []
+    lines = []
+    for line in result.stdout.splitlines():
+        # pid, ppid and pgid are numeric and ordered first, so they can be
+        # located without knowing how wide wchan is. The raw line is reported
+        # verbatim because a wchan value may itself contain spaces.
+        columns = line.split(None, 3)
+        # pid ppid pgid state...
+        if len(columns) < 4 or columns[2] != str(pid):
+            continue
+        lines.append(f"  {line.strip()}")
+    return lines
+
+
+def _process_snapshot(pid: int) -> str:
+    """Report what the installer and its children were blocked on.
+
+    The installer's own narration names the step it *entered*, and the stub call
+    log names the commands around it. Neither distinguishes waiting on a child
+    from blocked on a pipe from spinning, which is why the kernel wait channel
+    is included: it is the difference between a diagnosis and another guess.
+
+    The installer is started in its own session, so its process group id equals
+    its pid and no getpgid call is needed. That call would race with the child
+    exiting, which is exactly the case where the tree still needs reporting.
+    """
+    lines = []
+    proc_root = Path("/proc")
+    if proc_root.is_dir():
+        for entry in sorted(proc_root.iterdir(), key=lambda item: item.name):
+            if not entry.name.isdigit():
+                continue
+            fields = _proc_fields(int(entry.name))
+            if fields is not None and fields[1] == str(pid):
+                lines.append(_proc_process_line(int(entry.name)))
+    if not lines:
+        lines = _ps_process_lines(pid)
+    return "\n".join(lines) if lines else "  <no installer process found>"
+
+
+def _kill_process_group(installer: subprocess.Popen[str]) -> None:
+    """Tear down the whole session so no stub outlives the timeout.
+
+    Killing only the direct child would leave the stubs it spawned holding the
+    captured pipes open, so the drain that follows could block indefinitely.
+    """
+    if sys.platform == "win32":
+        # No process group to signal, and these scenarios skip on Windows
+        # anyway. Still kill the child so a timeout can never wedge the suite.
+        with contextlib.suppress(OSError):
+            installer.kill()
+    else:
+        with contextlib.suppress(OSError):
+            os.killpg(installer.pid, signal.SIGKILL)
 
 
 def _pkg_command() -> str:
@@ -186,6 +314,20 @@ exit 0
 """
 
 
+def _pgrep_command() -> str:
+    """Stub `pgrep` that reports no matching process.
+
+    `luicode_process_ids` prefers pgrep over ps whenever pgrep resolves, and
+    Termux ships procps, so a real pgrep is what the installer sees on the host
+    running these scenarios. Without this stub the "stop luicode first" check
+    reads the host process table and every scenario depends on whether the
+    runner happens to have a matching command line.
+    """
+    return """#!/bin/sh
+exit 1
+"""
+
+
 def _entry_point(name: str) -> str:
     return f"""#!/bin/sh
 if [ "$FAIL_STEP" = "entrypoint-run" ]; then
@@ -217,19 +359,20 @@ class TermuxHarness:
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
-    def _timeout_report(self, error: subprocess.TimeoutExpired) -> AssertionError:
+    def _timeout_report(
+        self,
+        error: subprocess.TimeoutExpired,
+        snapshot: str,
+        stdout: str,
+        stderr: str,
+    ) -> AssertionError:
         """Describe where the installer stalled, without raising the bare timeout.
 
         ``install.sh`` narrates each phase, so its partial stdout/stderr names the last
         step that started. The stub call log then shows which external commands
-        ran around it.
+        ran around it, and the process snapshot shows what the installer was
+        actually blocked on at the moment the budget ran out.
         """
-        stdout = error.stdout or ""
-        stderr = error.stderr or ""
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", "replace")
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", "replace")
         # Capture step/fail output from both streams (they write to stderr)
         all_lines = [line for line in stdout.splitlines() if line.strip()]
         all_lines += [line for line in stderr.splitlines() if line.strip()]
@@ -240,26 +383,45 @@ class TermuxHarness:
             f"install.sh exceeded {budget} budget.\n"
             f"Last installer output: {last_phase}\n"
             f"Recent stub invocations: {recent_calls}\n"
+            f"Installer processes at the timeout:\n{snapshot}\n"
             f"--- stdout ---\n{stdout}\n"
             f"--- stderr ---\n{stderr}"
         )
 
     def run(self, *args: str, fail_step: str = "") -> subprocess.CompletedProcess[str]:
+        command = ["/bin/sh", str(_repo_root() / "scripts" / "install.sh"), *args]
+        # The installer must never consume the harness' stdin. Leaving it
+        # inherited lets a pipeline block forever on CI, where stdin is an
+        # open pipe with no writer.
+        #
+        # The process is started directly rather than through subprocess.run so
+        # the timeout path can inspect it before anything is killed: run() kills
+        # the child before raising, which destroys the evidence. Its own session
+        # also makes the whole tree killable in one call.
+        installer = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=self.env | {"FAIL_STEP": fail_step},
+            start_new_session=True,
+        )
         try:
-            return subprocess.run(
-                ["/bin/sh", str(_repo_root() / "scripts" / "install.sh"), *args],
-                check=False,
-                capture_output=True,
-                text=True,
-                # The installer must never consume the harness' stdin. Leaving it
-                # inherited lets a pipeline block forever on CI, where stdin is an
-                # open pipe with no writer.
-                stdin=subprocess.DEVNULL,
-                env=self.env | {"FAIL_STEP": fail_step},
-                timeout=120,
-            )
+            stdout, stderr = installer.communicate(timeout=INSTALL_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired as error:
-            raise self._timeout_report(error) from error
+            snapshot = _process_snapshot(installer.pid)
+            _kill_process_group(installer)
+            try:
+                stdout, stderr = installer.communicate(timeout=TIMEOUT_DRAIN_SECONDS)
+            except subprocess.TimeoutExpired:
+                # Keep whatever arrived before the kill; losing it would hide the
+                # very phase this report exists to name.
+                stdout, stderr = _as_text(error.stdout), _as_text(error.stderr)
+            raise self._timeout_report(error, snapshot, stdout, stderr) from error
+        return subprocess.CompletedProcess(
+            command, installer.returncode, stdout, stderr
+        )
 
     def src_dir(self) -> Path:
         return self.home / ".luicode-src"
@@ -356,10 +518,13 @@ def termux_harness(tmp_path: Path) -> TermuxHarness:
         path.mkdir(parents=True)
 
     # Termux's termux-tools bootstrap ships awk, so a deterministic one is put
-    # on PATH. procps is also in termux-tools; report no matching processes so
-    # the "stop luicode first" check never depends on the host process table.
+    # on PATH. procps is also in termux-tools, and luicode_process_ids prefers
+    # pgrep over ps whenever pgrep resolves, so both are stubbed to report no
+    # matching processes. Stubbing ps alone would leave the "stop luicode first"
+    # check reading the host process table on any runner that ships pgrep.
     _write_executable(bin_dir / "awk", '#!/bin/sh\nexec /usr/bin/awk "$@"\n')
     _write_executable(bin_dir / "ps", "#!/bin/sh\nexit 0\n")
+    _write_executable(bin_dir / "pgrep", _pgrep_command())
     _write_executable(
         bin_dir / "uname",
         """#!/bin/sh
@@ -712,6 +877,25 @@ def test_existing_rc_content_is_preserved(termux_harness: TermuxHarness):
     assert "# my own settings" in text
     assert "export EDITOR=vim" in text
     assert text.count("# >>> LUICode PATH >>>") == 1
+
+
+def test_rc_content_without_a_trailing_newline_is_preserved(
+    termux_harness: TermuxHarness,
+):
+    # `read` reports end of file on a final line that has no newline while still
+    # assigning it, so a rewrite loop that only checks the exit status drops that
+    # line. An rc file a user edited by hand routinely ends this way, and the
+    # line that would be lost is their own setting.
+    rc = termux_harness.rc_file()
+    rc.write_text("export EDITOR=vim", encoding="utf-8")
+
+    result = termux_harness.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    text = rc.read_text(encoding="utf-8")
+    assert "export EDITOR=vim" in text
+    assert text.count("# >>> LUICode PATH >>>") == 1
+    assert text.index("export EDITOR=vim") < text.index("# >>> LUICode PATH >>>")
 
 
 def test_changed_entry_point_directory_replaces_the_managed_block(
