@@ -353,7 +353,11 @@ uv sync --extra voice_local
 
 ### Update
 ```bash
+# Track the main branch
 luicode-update
+
+# Install the newest published release tag instead
+luicode-upgrade
 ```
 
 ### Uninstall

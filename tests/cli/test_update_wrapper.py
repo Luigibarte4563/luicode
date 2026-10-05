@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[2]
 INSTALL_URL = (
     "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install"
 )
-SCRIPTS = ("luicode-update", "luicode-update.cmd")
+UPDATE_SCRIPTS = ("luicode-update", "luicode-update.cmd")
+UPGRADE_SCRIPTS = ("luicode-upgrade", "luicode-upgrade.cmd")
+SCRIPTS = UPDATE_SCRIPTS + UPGRADE_SCRIPTS
 
 
 @contextlib.contextmanager
@@ -170,3 +172,85 @@ printf 'exit 99\\n' > "$LUICODE_TEST_LAUNCHER"
         )
         assert result.returncode == 0, result.stderr
         assert not any((area / "bin" / name).exists() for name in SCRIPTS)
+
+
+@pytest.mark.parametrize("scripts", [UPDATE_SCRIPTS, UPGRADE_SCRIPTS])
+def test_upgrade_requests_the_pinned_release_and_update_does_not(tmp_path, scripts):
+    """luicode-upgrade must ask the installer for a release pin; luicode-update must not."""
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv is required for native script lifecycle coverage")
+    area = tmp_path / "upgrade"
+    area.mkdir()
+    env = dict(os.environ)
+    launcher_name = scripts[1] if os.name == "nt" else scripts[0]
+    env.update(
+        UV_TOOL_DIR=str(area / "tools"),
+        UV_TOOL_BIN_DIR=str(area / "bin"),
+        UV_CACHE_DIR=str(area / "cache"),
+        UV_NO_CONFIG="1",
+        UV_PYTHON_DOWNLOADS="never",
+    )
+    if os.name == "nt":
+        body = (
+            "param([switch] $VoiceLocal, [string] $TorchBackend,"
+            " [switch] $LatestRelease)\n"
+            'Write-Output "installer:latest=$LatestRelease"\n'
+        )
+        # An unset switch renders as the empty string, so the update launcher must
+        # report "latest=" with no value.
+        expected = (
+            "installer:latest=True"
+            if scripts == UPGRADE_SCRIPTS
+            else "installer:latest="
+        )
+    else:
+        # The upgrade shim runs `sh -c "$installer" sh --latest-release "$@"`, so
+        # the release flag is the installer's first positional argument. The update
+        # shim forwards no arguments at all.
+        body = "printf 'installer:%s\\n' \"${1:-none}\"\n"
+        expected = (
+            "installer:--latest-release"
+            if scripts == UPGRADE_SCRIPTS
+            else "installer:none"
+        )
+    with installer_server(body, 200) as (url, requests):
+        wheel = fixture_wheel(area, url)
+        result = subprocess.run(
+            [
+                uv,
+                "tool",
+                "install",
+                "--python",
+                getattr(sys, "_base_executable", sys.executable),
+                str(wheel),
+            ],
+            env=env,
+            capture_output=True,
+            timeout=90,
+        )
+        assert result.returncode == 0, result.stderr
+        launcher = area / "bin" / launcher_name
+        command = (
+            f'"{os.environ.get("COMSPEC", "cmd.exe")}" /d /s /c ""{launcher}"'
+            if os.name == "nt"
+            else [str(launcher)]
+        )
+        result = subprocess.run(
+            command,
+            env=env,
+            cwd=area,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert expected in result.stdout, result.stdout + result.stderr
+        assert requests == ["/install.ps1" if os.name == "nt" else "/install.sh"]
+        result = subprocess.run(
+            [uv, "tool", "uninstall", "luicode"],
+            env=env,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr

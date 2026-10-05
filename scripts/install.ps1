@@ -2,6 +2,7 @@ param(
     [switch] $VoiceLocal,
     [string] $TorchBackend = "",
     [switch] $Rtk,
+    [switch] $LatestRelease,
     [switch] $DryRun,
     [switch] $Help,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -13,7 +14,11 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 # Set to your luicode repository (owner/repo).
-$RepoArchiveUrl = "https://github.com/Luigibarte4563/luicode/archive/refs/heads/main.zip"
+$RepoSlug = "Luigibarte4563/luicode"
+$RepoArchiveUrl = "https://github.com/$RepoSlug/archive/refs/heads/main.zip"
+# Published releases only; drafts never appear here. Parsed rather than using the
+# GitHub API so the shell installer needs no jq, keeping both platforms in step.
+$RepoReleasesFeedUrl = "https://github.com/$RepoSlug/releases.atom"
 # Windows on ARM emulates x64, whose Python package ecosystem has broader wheel support.
 $PythonRequest = "cpython-3.14.0-windows-x86_64-none"
 $MinUvVersion = "0.12.13"
@@ -44,6 +49,7 @@ $script:InstallAider = $true
 $script:PiAvailable = $false
 $script:MuseAvailable = $false
 $script:EnableRtk = $Rtk.IsPresent
+$script:LuicodeReleaseTag = ""
 $LuicodeCommands = @(
     # Include retired entry points so updates reject older LUICODE processes before replacement.
     "luicode-desktop",
@@ -59,6 +65,7 @@ $LuicodeCommands = @(
     "luicode-muse",
     "luicode-aider",
     "luicode-update",
+    "luicode-upgrade",
     "luicode-init",
     "luicode"
 )
@@ -73,6 +80,7 @@ Options:
   -VoiceLocal            Install local Whisper voice transcription support.
   -TorchBackend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   -Rtk                   Install and configure RTK for the selected coding agents.
+  -LatestRelease         Install the newest published release tag instead of tracking main.
   -DryRun                Print commands without running them.
   -Help                  Show this help text.
 "@
@@ -1394,14 +1402,124 @@ function Ensure-Uv {
     Confirm-Uv
 }
 
+function Get-LatestReleaseTag {
+    # The releases feed lists published releases newest-first, but that order is by
+    # publish date, so sort by [version] to keep v1.0.10 ahead of v1.0.9.
+    $response = Invoke-WebRequest -Uri $RepoReleasesFeedUrl -UseBasicParsing
+    [xml] $feed = $response.Content
+    if ($null -eq $feed.DocumentElement) {
+        throw "Could not read $RepoReleasesFeedUrl."
+    }
+    # SelectNodes rather than $feed.feed.entry: a feed with no entries has no
+    # 'entry' property, and Set-StrictMode turns reading it into a terminating
+    # error instead of the "no published release" message below.
+    $entries = $feed.SelectNodes("/*[local-name()='feed']/*[local-name()='entry']")
+    $versions = @()
+    foreach ($entry in $entries) {
+        $titleNode = $entry.SelectSingleNode("*[local-name()='title']")
+        if ($null -eq $titleNode) {
+            continue
+        }
+        if ($titleNode.InnerText -notmatch '^v(\d+\.\d+\.\d+)$') {
+            continue
+        }
+        $versions += [version] $Matches[1]
+    }
+    if ($versions.Count -eq 0) {
+        throw "No published release tag was found at $RepoReleasesFeedUrl."
+    }
+    return "v$(($versions | Sort-Object -Descending)[0])"
+}
+
+function Resolve-LatestRelease {
+    Write-Step "Resolving the newest published release"
+    $script:LuicodeReleaseTag = Get-LatestReleaseTag
+    Write-Host "Newest published release: $script:LuicodeReleaseTag"
+}
+
+function Get-LuicodeVersion {
+    $command = Get-ApplicationCommand -Name "luicode-server"
+    if ($null -eq $command) {
+        return ""
+    }
+    $output = Invoke-Utf8NativeCapture -FilePath $command.Source -Arguments @("--version")
+    # `luicode-server --version` prints "luicode <version>". The shared
+    # Convert-SemanticVersionOutput only understands the uv/node/dsh/hermes output
+    # shapes, so match the version directly, as the shell installer does with awk.
+    $match = [regex]::Match(($output -join "`n"), '\d+\.\d+\.\d+')
+    if (-not $match.Success) {
+        return ""
+    }
+    return $match.Value
+}
+
+function Stop-IfAlreadyOnLatestRelease {
+    # luicode-server is only on PATH once the installer has set up its bin
+    # directories, so a lookup failure just means "assume an upgrade is needed".
+    $installed = Get-LuicodeVersion
+    if ([string]::IsNullOrWhiteSpace($installed)) {
+        return
+    }
+    $latest = $script:LuicodeReleaseTag.TrimStart('v')
+    if ($installed -eq $latest) {
+        Write-Host ""
+        Write-Host "luicode is already on the newest release, $($script:LuicodeReleaseTag). Nothing to do."
+        exit 0
+    }
+    Write-Host "Installed version: $installed"
+}
+
+function Get-ReleasePinFile {
+    return (Join-Path (Join-Path $env:USERPROFILE ".luicode") ".release-pin")
+}
+
+function Write-WarningWhenReleasePinned {
+    if (-not $LatestRelease) {
+        $pinFile = Get-ReleasePinFile
+        if (Test-Path -LiteralPath $pinFile) {
+            $pinned = (Get-Content -LiteralPath $pinFile -Raw -ErrorAction SilentlyContinue)
+            if (-not [string]::IsNullOrWhiteSpace($pinned)) {
+                $pinned = $pinned.Trim()
+                Write-Warning "This installation is pinned to release $pinned by luicode-upgrade."
+                Write-Warning "This run installs from the main branch, so you will move back to main."
+                Write-Warning 'Run "luicode-upgrade" instead to stay on a published release.'
+            }
+        }
+    }
+}
+
+function Write-ReleasePin {
+    if (-not $LatestRelease) {
+        return
+    }
+    $configDir = Join-Path $env:USERPROFILE ".luicode"
+    $pinFile = Get-ReleasePinFile
+    if ($DryRun) {
+        Write-Host "+ write $script:LuicodeReleaseTag -> $pinFile"
+        return
+    }
+    if (-not (Test-Path -LiteralPath $configDir)) {
+        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+    }
+    # WriteAllText rather than Set-Content -Encoding utf8NoBOM: the luicode-upgrade.cmd
+    # shim runs Windows PowerShell 5.1, where that encoding name does not exist.
+    [IO.File]::WriteAllText($pinFile, "$script:LuicodeReleaseTag`n")
+    Write-Host "Recorded release pin $script:LuicodeReleaseTag in $pinFile"
+}
+
 function Get-PackageSpec {
     # NVIDIA NIM voice ships in the standard install, so only the local Whisper
-    # extra is selectable. Kept pointed at this repository's archive because
-    # luicode is not published to PyPI under this name.
-    if ($VoiceLocal) {
-        return "luicode[voice_local] @ $RepoArchiveUrl"
+    # extra is selectable. The spec points at a GitHub archive rather than PyPI so
+    # the install works on platforms with no trusted-publishing support, including
+    # Android/Termux. A release upgrade swaps the branch archive for a tag archive.
+    $archiveUrl = $RepoArchiveUrl
+    if ($LatestRelease) {
+        $archiveUrl = "https://github.com/$RepoSlug/archive/refs/tags/$script:LuicodeReleaseTag.zip"
     }
-    return "luicode @ $RepoArchiveUrl"
+    if ($VoiceLocal) {
+        return "luicode[voice_local] @ $archiveUrl"
+    }
+    return "luicode @ $archiveUrl"
 }
 
 function Install-Luicode {
@@ -1598,6 +1716,16 @@ if ((-not [string]::IsNullOrWhiteSpace($TorchBackend)) -and (-not $VoiceLocal)) 
 # Preserve the user's winning command before adding installer search paths.
 $script:OriginalOpenCode = Get-ApplicationCommand "opencode"
 Add-KnownBinDirectories
+
+if ($LatestRelease) {
+    Resolve-LatestRelease
+    # After Add-KnownBinDirectories so the installed luicode-server answers.
+    Stop-IfAlreadyOnLatestRelease
+}
+else {
+    Write-WarningWhenReleasePinned
+}
+
 $script:InstallCline = [bool] ((Get-ApplicationCommand "cline") -or (Get-ApplicationCommand "npm"))
 Write-Step "Checking for running luicode processes"
 Assert-NoLuicodeProcessesRunning
@@ -1628,6 +1756,9 @@ Install-Luicode
 
 Write-Step "Configuring PATH and verifying luicode"
 Configure-AndConfirmLuicode
+
+# Recorded only after verification passed, so a failed upgrade leaves no pin.
+Write-ReleasePin
 
 Write-Host ""
 if ($DryRun) {

@@ -17,3 +17,9 @@ llama_cache
 .smoke-results
 /test-results/
 .vscode
+# Windows PowerShell resolves its module analysis cache relative to the checkout
+# when a redirected USERPROFILE makes the default path relative, which installer
+# tests do deliberately. tests/installers/test_powershell_cache.py asserts the
+# cache stays out of the working directory; ignore it too so a leaked file from a
+# manual installer run cannot be committed.
+/Microsoft/Windows/PowerShell/ModuleAnalysisCache

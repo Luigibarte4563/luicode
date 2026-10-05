@@ -25,6 +25,8 @@ def release(tmp_path):
         "LICENSE": "license",
         "scripts/update/luicode-update": "#!/bin/sh\n",
         "scripts/update/luicode-update.cmd": "@echo off\n",
+        "scripts/update/luicode-upgrade": "#!/bin/sh\n",
+        "scripts/update/luicode-upgrade.cmd": "@echo off\n",
         "src/luicode/__init__.py": "",
         "src/luicode/cli.py": "",
         "src/luicode/desktop.py": "",
@@ -40,7 +42,12 @@ def release(tmp_path):
         for name, content in files.items()
         if name.startswith("src/")
     }
-    for name in ("luicode-update", "luicode-update.cmd"):
+    for name in (
+        "luicode-update",
+        "luicode-update.cmd",
+        "luicode-upgrade",
+        "luicode-upgrade.cmd",
+    ):
         wheel[f"luicode-1.2.3.data/scripts/{name}"] = files[f"scripts/update/{name}"]
     wheel["luicode-1.2.3.dist-info/METADATA"] = metadata
     wheel["luicode-1.2.3.dist-info/entry_points.txt"] = (

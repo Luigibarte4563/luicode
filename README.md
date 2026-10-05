@@ -605,9 +605,21 @@ Stop all running luicode commands, then run:
 luicode-update
 ```
 
+This installs from the `main` branch, so you always get the newest code. If you
+prefer to stay on a published release, run `luicode-upgrade` instead: it installs
+the newest release tag and pins you to it, and tells you when you are already on
+it.
+
+```sh
+luicode-upgrade
+```
+
+Pinned installations receive fixes only when the next release is published, so
+`luicode-update` warns you that it is moving you back to `main`.
+
 For local voice support, include `--voice-local` (macOS/Linux) or `-VoiceLocal` (Windows), plus your `--torch-backend` or `-TorchBackend` option if used.
 
-If your installation does not have `luicode-update` yet, run the [installer](#install) once to add it.
+If your installation does not have `luicode-update` or `luicode-upgrade` yet, run the [installer](#install) once to add them.
 
 ### Muse Code on native Windows
 

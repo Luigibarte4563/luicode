@@ -80,6 +80,8 @@ packages = ["src/luicode"]
 [tool.hatch.build.targets.wheel.shared-scripts]
 "scripts/update/luicode-update" = "luicode-update"
 "scripts/update/luicode-update.cmd" = "luicode-update.cmd"
+"scripts/update/luicode-upgrade" = "luicode-upgrade"
+"scripts/update/luicode-upgrade.cmd" = "luicode-upgrade.cmd"
 
 [tool.hatch.version]
 source = "regex"

@@ -180,6 +180,17 @@ It runs `git pull --ff-only` and re-installs the package. Reruns are safe: the
 `PATH` block is replaced rather than duplicated, packages that are already
 present are not reinstalled, and your configuration and data are never touched.
 
+To move to a published release instead of tracking the main branch, run:
+
+```sh
+luicode-upgrade
+```
+
+This resolves the newest release tag and installs it with `uv tool` rather than
+the editable checkout, so it stops using `~/.luicode-src`; that directory is left
+on disk and can be deleted. Run `luicode-update` afterwards to return to tracking
+`main`.
+
 ## Uninstalling
 
 ```sh

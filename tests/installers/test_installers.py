@@ -27,6 +27,7 @@ LUICODE_COMMANDS = (
     "luicode-muse",
     "luicode-aider",
     "luicode-update",
+    "luicode-upgrade",
     "luicode-init",
     "luicode",
 )
@@ -4217,11 +4218,11 @@ def test_installers_use_native_clients_and_single_python_selection() -> None:
         assert "@earendil-works/pi-coding-agent" not in text
         assert "git+" not in text
         assert "git --version" not in text
-        # luicode installs from its own repository archive rather than PyPI.
-        assert (
-            "https://github.com/Luigibarte4563/luicode/archive/refs/heads/main.zip"
-            in text
-        )
+        # luicode installs from its own repository archive rather than PyPI. Both
+        # installers derive that URL from the repository slug, so assert the slug
+        # and the archive path rather than a single expanded literal.
+        assert "Luigibarte4563/luicode" in text
+        assert "archive/refs/heads/main.zip" in text
         assert "python install" not in text
         assert "--refresh-package" in text
         assert "tool update-shell" in text

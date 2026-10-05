@@ -1,5 +1,6 @@
 src/luicode/core/data/cl100k_base.tiktoken -text linguist-vendored=true
 scripts/update/luicode-update text eol=lf
+scripts/update/luicode-upgrade text eol=lf
 scripts/update/*.cmd text eol=crlf
 # core.autocrlf rewrites these to CRLF on a Windows checkout, which breaks the
 # shebang when a POSIX shell runs them. The installers are only ever driven by

@@ -35,6 +35,12 @@ def test_powershell_module_cache_does_not_leak_into_working_directory(
         / "ModuleAnalysisCache"
     )
     watched_cache = Path(cache_value) if cache_value else leaked_cache
+    # PowerShell writes the module analysis cache from a background worker, so the
+    # probe below has to stay alive to let that flush land; without the wait the
+    # process exits first and no cache file is produced. The outer timeout must
+    # therefore stay well above the probe's own 20s deadline, otherwise a slow
+    # flush under parallel test load raises TimeoutExpired here and hides the real
+    # assertion failure. Keep this comfortably larger than the deadline below.
     result = subprocess.run(
         [
             shell,
@@ -60,7 +66,7 @@ while (-not (Test-Path -LiteralPath $env:LUICODE_TEST_WATCHED_CACHE) -and [DateT
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=90,
     )
 
     assert result.returncode == 0, result.stderr

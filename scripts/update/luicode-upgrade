@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+# Installs the newest published release tag. For the main-tracking upgrade, use
+# luicode-update instead.
+installer=$(curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install.sh")
+exec sh -c "$installer" sh --latest-release "$@"

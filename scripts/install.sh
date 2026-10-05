@@ -2,7 +2,11 @@
 set -eu
 
 # Set to your luicode repository (owner/repo).
-REPO_ARCHIVE_URL="https://github.com/Luigibarte4563/luicode/archive/refs/heads/main.zip"
+REPO_SLUG="Luigibarte4563/luicode"
+REPO_ARCHIVE_URL="https://github.com/$REPO_SLUG/archive/refs/heads/main.zip"
+# Published releases only; drafts never appear here. Parsed instead of the GitHub
+# API because the shell flow has no jq and git is not a dependency off Termux.
+REPO_RELEASES_FEED_URL="https://github.com/$REPO_SLUG/releases.atom"
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.12.13"
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
@@ -21,10 +25,11 @@ LUICODE_MACOS_BUNDLE_ID="com.luicode.desktop"
 LUICODE_MACOS_OWNER_FILE=".luicode-owner"
 # Include every entry point plus the retired `luicode-init` so updates reject
 # older LUICODE processes before replacement.
-LUICODE_COMMANDS="luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-update luicode-init luicode"
+LUICODE_COMMANDS="luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-update luicode-upgrade luicode-init luicode"
 
 dry_run=0
 voice_local=0
+latest_release=0
 install_claude=1
 install_codex=1
 install_pi=1
@@ -77,6 +82,7 @@ Options:
   --voice-local            Install local Whisper voice transcription support (not available on Android/Termux).
   --torch-backend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   --rtk                    Install and configure RTK for the selected coding agents.
+  --latest-release         Install the newest published release tag instead of tracking main.
   --dry-run                Print commands without running them.
   --help                   Show this help text.
 USAGE
@@ -1322,13 +1328,20 @@ ensure_uv() {
 # CPython build for Android, so the package is installed with the interpreter
 # from `pkg` against a checkout kept in a user-owned directory. Every path here
 # is POSIX sh, needs no root, and never writes outside $HOME.
-LUICODE_REPO_URL="https://github.com/Luigibarte4563/luicode.git"
+LUICODE_REPO_URL="https://github.com/$REPO_SLUG.git"
 # Deliberately not $HOME/.luicode: that is the live config/data directory
 # (config/paths.py LUICODE_CONFIG_DIRNAME) and scripts/uninstall.sh purges it
 # with `rm -rf`, which would destroy the checkout and the user's config.
 # Guarded so an unset HOME cannot break the non-Termux flow under `set -u`;
 # detect_platform rejects an unset HOME before this value is used.
 LUICODE_SRC_DIR="${LUICODE_SRC_DIR:-${HOME:-}/.luicode-src}"
+# Config/data directory (config/paths.py LUICODE_CONFIG_DIRNAME). A release pin
+# recorded here lets a later main-tracking run explain that it is moving the user
+# back to main. Both uninstallers purge this directory, so the pin never outlives
+# the install. Guarded for the same unset-HOME reason as LUICODE_SRC_DIR.
+LUICODE_CONFIG_DIR="${LUICODE_CONFIG_DIR:-${HOME:-}/.luicode}"
+LUICODE_RELEASE_PIN_FILE="$LUICODE_CONFIG_DIR/.release-pin"
+LUICODE_RELEASE_TAG=""
 LUICODE_MIN_PYTHON_VERSION="3.14.0"
 # Built-in Settings defaults (src/luicode/config/settings.py). Used only to
 # report the web URL when the effective settings cannot be loaded.
@@ -1808,6 +1821,9 @@ parse_args() {
             --rtk)
                 enable_rtk=1
                 ;;
+            --latest-release)
+                latest_release=1
+                ;;
             --dry-run)
                 dry_run=1
                 ;;
@@ -1836,15 +1852,95 @@ validate_args() {
     fi
 }
 
+latest_release_tag() {
+    # The releases feed lists published releases newest-first, but that order is by
+    # publish date, so sort by version to keep v1.0.10 ahead of v1.0.9. Portable
+    # sort: -V is not available on the BSD userland that macOS ships.
+    feed=$(curl -fsSL "$REPO_RELEASES_FEED_URL") ||
+        fail "Could not read $REPO_RELEASES_FEED_URL. Check your network connection."
+    tag=$(printf '%s\n' "$feed" |
+        sed -n 's|.*releases/tag/\(v[0-9][^"]*\)".*|\1|p' |
+        grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
+        sed 's/^v//' |
+        sort -t. -k1,1n -k2,2n -k3,3n |
+        tail -n 1)
+    [ -n "$tag" ] ||
+        fail "No published release tag was found at $REPO_RELEASES_FEED_URL."
+    printf 'v%s\n' "$tag"
+}
+
+resolve_latest_release() {
+    step "Resolving the newest published release"
+    LUICODE_RELEASE_TAG=$(latest_release_tag)
+    printf 'Newest published release: %s\n' "$LUICODE_RELEASE_TAG"
+}
+
+current_luicode_version() {
+    if output=$(luicode-server --version 2>/dev/null); then
+        :
+    else
+        return 1
+    fi
+
+    version=$(printf '%s\n' "$output" | awk '
+        match($0, /[0-9]+\.[0-9]+\.[0-9]+/) {
+            print substr($0, RSTART, RLENGTH)
+            exit
+        }
+    ')
+    [ -n "$version" ] || return 1
+    printf '%s\n' "$version"
+}
+
+stop_if_already_on_latest_release() {
+    # luicode-server is only on PATH once the installer has set up its bin
+    # directories, so a lookup failure just means "assume an upgrade is needed".
+    version=$(current_luicode_version) || return 0
+    if [ "$version" = "${LUICODE_RELEASE_TAG#v}" ]; then
+        printf '\nluicode is already on the newest release, %s. Nothing to do.\n' \
+            "$LUICODE_RELEASE_TAG"
+        exit 0
+    fi
+    printf 'Installed version: %s\n' "$version"
+}
+
+warn_when_release_pinned() {
+    [ -n "${HOME:-}" ] || return 0
+    [ -f "$LUICODE_RELEASE_PIN_FILE" ] || return 0
+    pinned=$(cat "$LUICODE_RELEASE_PIN_FILE" 2>/dev/null || true)
+    [ -n "$pinned" ] || return 0
+    printf 'warning: this installation is pinned to release %s by luicode-upgrade.\n' "$pinned" >&2
+    printf 'This run installs from the main branch, so you will move back to main.\n' >&2
+    printf 'Run "luicode-upgrade" instead to stay on a published release.\n' >&2
+}
+
+record_release_pin() {
+    [ "$latest_release" -eq 1 ] || return 0
+    [ -n "${HOME:-}" ] || return 0
+    if [ "$dry_run" -eq 1 ]; then
+        print_command mkdir -p "$LUICODE_CONFIG_DIR"
+        print_command "record $LUICODE_RELEASE_TAG in $LUICODE_RELEASE_PIN_FILE"
+        return 0
+    fi
+    mkdir -p "$LUICODE_CONFIG_DIR"
+    printf '%s\n' "$LUICODE_RELEASE_TAG" > "$LUICODE_RELEASE_PIN_FILE"
+    printf 'Recorded release pin %s in %s\n' "$LUICODE_RELEASE_TAG" "$LUICODE_RELEASE_PIN_FILE"
+}
+
 package_spec() {
     # NVIDIA NIM voice ships in the standard install, so only the local Whisper
-    # extra is selectable. Kept pointed at this repository's archive because
-    # luicode is not published to PyPI under this name.
+    # extra is selectable. The spec points at a GitHub archive rather than PyPI so
+    # the install works on platforms with no trusted-publishing support, including
+    # Android/Termux. A release upgrade swaps the branch archive for a tag archive.
     # On Android/Termux, local Whisper is not supported.
+    archive_url=$REPO_ARCHIVE_URL
+    if [ "$latest_release" -eq 1 ]; then
+        archive_url="https://github.com/$REPO_SLUG/archive/refs/tags/$LUICODE_RELEASE_TAG.zip"
+    fi
     if [ "$voice_local" -eq 1 ] && [ "$TERMUX" -eq 0 ]; then
-        printf 'luicode[voice_local] @ %s' "$REPO_ARCHIVE_URL"
+        printf 'luicode[voice_local] @ %s' "$archive_url"
     else
-        printf 'luicode @ %s' "$REPO_ARCHIVE_URL"
+        printf 'luicode @ %s' "$archive_url"
     fi
 }
 
@@ -1986,9 +2082,19 @@ PLIST
 parse_args "$@"
 validate_args
 
-# Android/Termux runs the self-contained pip flow above. Every other platform
-# continues unchanged into the uv tool flow below.
-if [ "$TERMUX" -eq 1 ]; then
+if [ "$latest_release" -eq 1 ]; then
+    # Checked here because resolving the tag needs curl, and require_command runs
+    # much later in the prerequisite pass.
+    require_command curl
+    resolve_latest_release
+else
+    warn_when_release_pinned
+fi
+
+# Android/Termux normally runs the self-contained pip flow above. A release
+# upgrade skips it so Termux converges on the same release-pinned uv tool install
+# every other platform uses.
+if [ "$TERMUX" -eq 1 ] && [ "$latest_release" -eq 0 ]; then
     detect_platform
     run_termux_installer
     exit 0
@@ -1997,6 +2103,11 @@ fi
 # Preserve the user's winning command before adding installer search paths.
 original_opencode_path=$(command -v opencode || true)
 add_known_bin_directories
+
+# After the bin directories are on PATH so the installed luicode-server answers.
+if [ "$latest_release" -eq 1 ]; then
+    stop_if_already_on_latest_release
+fi
 if command -v cline >/dev/null 2>&1 || command -v npm >/dev/null 2>&1; then
     install_cline=1
 fi
@@ -2046,6 +2157,9 @@ install_luicode
 
 step "Configuring PATH and verifying luicode"
 configure_and_verify_luicode
+
+# Recorded only after verification passed, so a failed upgrade leaves no pin.
+record_release_pin
 
 if [ "$(uname -s)" = "Darwin" ]; then
     step "Installing the luicode desktop launcher"
