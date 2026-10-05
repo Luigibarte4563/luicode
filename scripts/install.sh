@@ -1599,30 +1599,49 @@ termux_write_rc_block() {
 
     # Drop any previous managed block, keeping every other line untouched.
     if [ -e "$rc_target" ]; then
-        awk -v begin="$PATH_MARKER_BEGIN" -v end="$PATH_MARKER_END" '
-            $0 == begin { skipping = 1; next }
-            skipping && $0 == end { skipping = 0; next }
-            skipping { next }
-            { print }
-        ' "$rc_target" > "$rc_temporary" ||
+        # Pure shell implementation: filter out the managed block between
+        # markers. Reads its file operand only, so it can never block on an
+        # inherited stdin.
+        skipping=0
+        # `read` returns non-zero on a final line with no trailing newline while
+        # still assigning it, so the guard is what keeps that line from being
+        # silently dropped. `line` is pre-set because `set -u` would otherwise
+        # trip on a file whose first read hits end of file immediately.
+        line=""
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [ "$line" = "$PATH_MARKER_BEGIN" ]; then
+                skipping=1
+                continue
+            fi
+            if [ "$line" = "$PATH_MARKER_END" ]; then
+                skipping=0
+                continue
+            fi
+            if [ "$skipping" = 1 ]; then
+                continue
+            fi
+            printf '%s\n' "$line"
+        done < "$rc_target" > "$rc_temporary" ||
             fail "Could not rewrite $rc_target."
     else
         : > "$rc_temporary"
     fi
 
     # The separating blank line lives inside the block so repeated runs replace
-    # it instead of stacking newlines.
+    # it instead of stacking newlines. The surviving content is copied into
+    # $rc_target first, then the block is appended to $rc_target: building it in
+    # one command group over $rc_temporary would read and append the same file.
+    cat "$rc_temporary" > "$rc_target" ||
+        fail "Could not update $rc_target."
+
     {
-        cat "$rc_temporary"
         printf '\n%s\n' "$PATH_MARKER_BEGIN"
         printf '# Managed by the luicode installer; changes inside this block are overwritten.\n'
         printf 'export PATH="%s:$PATH"\n' "$LUICODE_BIN_DIR"
         printf '%s\n' "$PATH_MARKER_END"
-    } >> "$rc_temporary" ||
+    } >> "$rc_target" ||
         fail "Could not write the PATH block to $rc_target."
 
-    cat "$rc_temporary" > "$rc_target" ||
-        fail "Could not update $rc_target."
     rm -f "$rc_temporary"
 }
 

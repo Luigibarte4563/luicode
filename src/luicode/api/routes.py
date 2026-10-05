@@ -7,6 +7,7 @@ from loguru import logger
 
 from luicode.application.errors import ApplicationError
 from luicode.application.ports import ProviderResolver, RequestRuntimeLease
+from luicode.application.usage import UsageSink
 from luicode.config.model_refs import parse_provider_type
 from luicode.config.settings import Settings
 from luicode.core.anthropic import (
@@ -43,6 +44,15 @@ def _provider_resolver(lease: RequestRuntimeLease) -> ProviderResolver:
     return lambda provider_type: resolve_provider(provider_type, lease=lease)
 
 
+def _usage_sink(services: ApiServices) -> UsageSink | None:
+    """Return the shared usage sink when the runtime exposes one.
+
+    Usage recording is instrumentation: a runtime without a sink still serves
+    requests, so the executor falls back to its own sink.
+    """
+    return getattr(services.admin, "usage_sink", None)
+
+
 async def _create_messages_response(
     services: ApiServices,
     request_data: MessagesRequest,
@@ -62,7 +72,7 @@ async def _create_messages_response(
             generation_id=lease.generation_id,
             request_headers=request_headers,
             model_info_lookup=lease.model_info,
-            usage_sink=services.admin.usage_sink,
+            usage_sink=_usage_sink(services),
         )
         response = await handler.create(request_data, request_id=request_id)
     except ApplicationError as exc:
@@ -97,7 +107,7 @@ async def _create_responses_response(
             provider_resolver=_provider_resolver(lease),
             generation_id=lease.generation_id,
             request_headers=request_headers,
-            usage_sink=services.admin.usage_sink,
+            usage_sink=_usage_sink(services),
         )
         response = await handler.create(request_data, request_id=request_id)
     except ApplicationError as exc:

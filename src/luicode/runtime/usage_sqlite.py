@@ -1,12 +1,9 @@
 """SQLite persistence for usage records, mirroring code_sessions_sqlite.py patterns."""
 
-from __future__ import annotations
-
 import asyncio
-import json
-import os
 import sqlite3
-from contextlib import closing
+import time
+from contextlib import closing, suppress
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +11,6 @@ import anyio.to_thread
 
 from luicode.application.usage.record import (
     OptimizationSaving,
-    ProviderHealthSnapshot,
     RequestUsage,
 )
 from luicode.config.paths import usage_database_path, usage_lock_path
@@ -111,7 +107,9 @@ class UsageDatabase:
         self._lock_path = lock_path
         self._max_rows = max_rows
         self._retention_ms = retention_days * 24 * 60 * 60 * 1000
-        self._queue: asyncio.Queue[tuple[list[RequestUsage], list[OptimizationSaving]]] = asyncio.Queue()
+        self._queue: asyncio.Queue[
+            tuple[list[RequestUsage], list[OptimizationSaving]]
+        ] = asyncio.Queue()
         self._writer_task: asyncio.Task[None] | None = None
         self._closed = False
         self._lock = InterprocessFileLock(lock_path)
@@ -121,8 +119,11 @@ class UsageDatabase:
         self._writer_task = asyncio.create_task(self._writer_loop())
 
     async def _run_migrations(self) -> None:
-        async with self._lock:
-            await anyio.to_thread.run_sync(self._sync_migrate)
+        await anyio.to_thread.run_sync(self._locked_migrate)
+
+    def _locked_migrate(self) -> None:
+        with self._lock:
+            self._sync_migrate()
 
     def _sync_migrate(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +133,10 @@ class UsageDatabase:
             row = cursor.fetchone()
             current_version = row[0] if row else 0
             if current_version < _SCHEMA_VERSION:
-                conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (_SCHEMA_VERSION,))
+                conn.execute(
+                    "INSERT OR REPLACE INTO schema_version (version) VALUES (?)",
+                    (_SCHEMA_VERSION,),
+                )
             conn.commit()
 
     async def write_batch(
@@ -148,10 +152,8 @@ class UsageDatabase:
         self._closed = True
         if self._writer_task:
             self._writer_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._writer_task
-            except asyncio.CancelledError:
-                pass
         # Drain remaining
         while not self._queue.empty():
             reqs, opts = self._queue.get_nowait()
@@ -165,7 +167,7 @@ class UsageDatabase:
                 # Periodic retention cleanup
                 if self._should_cleanup():
                     await anyio.to_thread.run_sync(self._sync_retention)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
@@ -175,7 +177,6 @@ class UsageDatabase:
 
     def _should_cleanup(self) -> bool:
         # Run retention ~once per hour
-        import time
         return int(time.time()) % 3600 < 2
 
     def _sync_write_batch(
@@ -226,7 +227,9 @@ class UsageDatabase:
         cutoff = int(time.time() * 1000) - self._retention_ms
         with closing(sqlite3.connect(self._db_path, timeout=5.0)) as conn:
             conn.executescript(
-                _RETENTION_SQL.replace("?", str(cutoff)).replace("?", str(self._max_rows))
+                _RETENTION_SQL.replace("?", str(cutoff)).replace(
+                    "?", str(self._max_rows)
+                )
             )
             conn.commit()
 
@@ -317,7 +320,8 @@ class UsageDatabase:
             conn.row_factory = sqlite3.Row
 
             # Totals
-            cursor = conn.execute(f"""
+            cursor = conn.execute(
+                f"""
                 SELECT
                     COUNT(*) as total_requests,
                     SUM(input_tokens) as total_input,
@@ -327,11 +331,14 @@ class UsageDatabase:
                     COUNT(DISTINCT agent) as agents_used
                 FROM request_usage
                 {where}
-            """, params)
+            """,
+                params,
+            )
             totals = dict(cursor.fetchone() or {})
 
             # By provider
-            cursor = conn.execute(f"""
+            cursor = conn.execute(
+                f"""
                 SELECT provider_id, provider_model,
                     COUNT(*) as requests,
                     SUM(input_tokens) as input_tokens,
@@ -343,11 +350,14 @@ class UsageDatabase:
                 {where}
                 GROUP BY provider_id, provider_model
                 ORDER BY requests DESC
-            """, params)
+            """,
+                params,
+            )
             by_provider = [dict(r) for r in cursor]
 
             # By agent
-            cursor = conn.execute(f"""
+            cursor = conn.execute(
+                f"""
                 SELECT agent,
                     COUNT(*) as requests,
                     SUM(input_tokens) as input_tokens,
@@ -357,12 +367,21 @@ class UsageDatabase:
                 {where}
                 GROUP BY agent
                 ORDER BY requests DESC
-            """, params)
+            """,
+                params,
+            )
             by_agent = [dict(r) for r in cursor]
 
             # Optimization savings
-            opt_where = where.replace("request_usage", "optimization_savings").replace("started_ms", "at_ms") if where else ""
-            cursor = conn.execute(f"""
+            opt_where = (
+                where.replace("request_usage", "optimization_savings").replace(
+                    "started_ms", "at_ms"
+                )
+                if where
+                else ""
+            )
+            cursor = conn.execute(
+                f"""
                 SELECT optimization,
                     COUNT(*) as count,
                     SUM(saved_input_tokens) as saved_input,
@@ -372,12 +391,15 @@ class UsageDatabase:
                 {opt_where}
                 GROUP BY optimization
                 ORDER BY saved_input DESC
-            """, params)
+            """,
+                params,
+            )
             by_optimization = [dict(r) for r in cursor]
 
             # Time series (hourly buckets for last 24h)
             hour_ago = int(time.time() * 1000) - 24 * 60 * 60 * 1000
-            cursor = conn.execute(f"""
+            cursor = conn.execute(
+                """
                 SELECT
                     (started_ms / 3600000) * 3600000 as bucket_ms,
                     COUNT(*) as requests,
@@ -387,7 +409,9 @@ class UsageDatabase:
                 WHERE started_ms >= ?
                 GROUP BY bucket_ms
                 ORDER BY bucket_ms
-            """, [hour_ago])
+            """,
+                [hour_ago],
+            )
             timeseries = [dict(r) for r in cursor]
 
             return {

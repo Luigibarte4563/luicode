@@ -1,7 +1,5 @@
 """SSE stream observer that extracts usage without buffering content."""
 
-from __future__ import annotations
-
 import time
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
@@ -17,7 +15,6 @@ from luicode.application.usage.record import (
 from luicode.application.usage.sink import UsageSink
 from luicode.core.anthropic.sse_aggregation import AnthropicSSEDecoder
 from luicode.core.anthropic.stream_contracts import SSEEvent
-from luicode.core.anthropic.tokens import get_token_count
 from luicode.core.trace import trace_event
 
 
@@ -32,6 +29,7 @@ class _ObservedUsage:
     ttfb_ms: int = 0
     first_chunk_ms: int = 0
     ended_ms: int = 0
+    latency_ms: int = 0
     outcome: RequestOutcome = RequestOutcome.SUCCESS
     failure_kind: FailureKind | None = None
     status_code: int | None = None
@@ -74,13 +72,15 @@ class UsageObserver:
         self._first_chunk = True
         self._completed = False
 
-    async def observe(self, stream: AsyncIterator[str]) -> AsyncGenerator[str, None]:
+    async def observe(self, stream: AsyncIterator[str]) -> AsyncGenerator[str]:
         """Consume the provider stream, yield chunks, emit usage on completion."""
         try:
             async for chunk in stream:
                 if self._first_chunk:
                     self._observed.first_chunk_ms = int(time.time() * 1000)
-                    self._observed.ttfb_ms = self._observed.first_chunk_ms - self._started_ms
+                    self._observed.ttfb_ms = (
+                        self._observed.first_chunk_ms - self._started_ms
+                    )
                     self._first_chunk = False
                 yield chunk
                 self._decode_chunk(chunk)
@@ -109,14 +109,20 @@ class UsageObserver:
         if ptype == "message_delta":
             usage = payload.get("usage")
             if isinstance(usage, dict):
-                self._observed.output_tokens = usage.get("output_tokens", self._observed.output_tokens)
+                self._observed.output_tokens = usage.get(
+                    "output_tokens", self._observed.output_tokens
+                )
                 # input_tokens in message_delta is cumulative
                 if "input_tokens" in usage:
                     self._observed.input_tokens = usage["input_tokens"]
                 if "cache_read_input_tokens" in usage:
-                    self._observed.cache_read_input_tokens = usage["cache_read_input_tokens"]
+                    self._observed.cache_read_input_tokens = usage[
+                        "cache_read_input_tokens"
+                    ]
                 if "cache_creation_input_tokens" in usage:
-                    self._observed.cache_creation_input_tokens = usage["cache_creation_input_tokens"]
+                    self._observed.cache_creation_input_tokens = usage[
+                        "cache_creation_input_tokens"
+                    ]
 
         elif ptype == "error":
             err = payload.get("error")
@@ -129,7 +135,9 @@ class UsageObserver:
         elif ptype == "message_stop":
             self._observed.ended_ms = int(time.time() * 1000)
             self._observed.outcome = (
-                RequestOutcome.FALLBACK_SUCCESS if self._attempt_count > 1 else RequestOutcome.SUCCESS
+                RequestOutcome.FALLBACK_SUCCESS
+                if self._attempt_count > 1
+                else RequestOutcome.SUCCESS
             )
             self._finalize()
 

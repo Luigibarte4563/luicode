@@ -58,6 +58,14 @@ jobs:
             run: uv run --locked ruff check
           - id: ty
             run: uv run --locked ty check
+          - id: js-syntax
+            run: |
+              for file in src/luicode/api/admin_static/*.js; do
+                node --check "$file" || {
+                  echo "::error::$file has a JavaScript syntax error"
+                  exit 1
+                }
+              done
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

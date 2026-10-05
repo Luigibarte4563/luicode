@@ -26,6 +26,7 @@ from luicode.config.admin.manifest import FIELD_BY_KEY
 from luicode.config.provider_catalog import (
     PROVIDER_CATALOG,
     ProviderAuthKind,
+    ProviderDescriptor,
 )
 from luicode.core.json_types import JsonObject, JsonValue
 from luicode.core.version import package_version
@@ -508,9 +509,7 @@ async def usage_summary(
     since_hours: int = 24,
 ):
     require_loopback_admin(request)
-    since_ms = int((__import__("time").time() - since_hours * 3600) * 1000)
-    db = await services.admin.usage_database()
-    return _no_store(db.get_summary(since_ms=since_ms))
+    return _no_store(await services.admin.usage_summary(since_hours))
 
 
 @router.get("/admin/api/usage/requests")
@@ -525,22 +524,15 @@ async def usage_requests(
     outcome: str | None = None,
 ):
     require_loopback_admin(request)
-    since_ms = int((__import__("time").time() - since_hours * 3600) * 1000)
-    db = await services.admin.usage_database()
-    requests = db.query_requests(
-        since_ms=since_ms,
-        provider_id=provider_id,
-        agent=agent,
-        outcome=outcome,
-        limit=limit,
-        offset=offset,
-    )
     return _no_store(
-        {
-            "requests": [r.to_row() for r in requests],
-            "limit": limit,
-            "offset": offset,
-        }
+        await services.admin.usage_requests(
+            since_hours=since_hours,
+            limit=limit,
+            offset=offset,
+            provider_id=provider_id,
+            agent=agent,
+            outcome=outcome,
+        )
     )
 
 
@@ -553,18 +545,12 @@ async def usage_optimizations(
     optimization: str | None = None,
 ):
     require_loopback_admin(request)
-    since_ms = int((__import__("time").time() - since_hours * 3600) * 1000)
-    db = await services.admin.usage_database()
-    optimizations = db.query_optimizations(
-        since_ms=since_ms,
-        optimization=optimization,
-        limit=limit,
-    )
     return _no_store(
-        {
-            "optimizations": [o.to_row() for o in optimizations],
-            "limit": limit,
-        }
+        await services.admin.usage_optimizations(
+            since_hours=since_hours,
+            limit=limit,
+            optimization=optimization,
+        )
     )
 
 
@@ -577,56 +563,47 @@ async def providers_health(
     lease = await services.requests.acquire()
     try:
         health_data = []
-        settings = lease.settings
-        # Get all provider IDs from catalog that are configured
-        for provider_id in settings.model_fields.keys():
-            if not provider_id.endswith("_api_key") and not provider_id.endswith("_proxy"):
+        for provider_id, descriptor in PROVIDER_CATALOG.items():
+            # Only report providers the user has actually configured.
+            if not descriptor.is_configured(lease.settings):
                 continue
-            provider_base = provider_id.replace("_api_key", "").replace("_proxy", "").lower()
-            if provider_base in ("provider", "model", "reasoning", "messaging", "voice", "web", "diagnostics", "smoke"):
-                continue
-            # Try to resolve provider and get admission controller
             try:
-                provider = await lease.resolve_provider(provider_base)
-                admission = provider.admission_controller()
-                if admission and hasattr(admission, "health_snapshot"):
-                    health_data.append(admission.health_snapshot())
-                else:
-                    health_data.append({
-                        "provider_id": provider_base,
-                        "display_name": provider_base,
-                        "is_healthy": True,
-                        "success_rate": 1.0,
-                        "p50_latency_ms": None,
-                        "p95_latency_ms": None,
-                        "current_episode": "idle",
-                        "last_error": None,
-                        "last_success_ms": None,
-                        "rate_limit_remaining": None,
-                        "rate_limit_reset_ms": None,
-                        "concurrency_used": 0,
-                        "concurrency_limit": 5,
-                    })
+                provider = await lease.resolve_provider(provider_id)
             except Exception:
-                # Provider not configured or not available
-                health_data.append({
-                    "provider_id": provider_base,
-                    "display_name": provider_base,
-                    "is_healthy": False,
-                    "success_rate": 0.0,
-                    "p50_latency_ms": None,
-                    "p95_latency_ms": None,
-                    "current_episode": "not_configured",
-                    "last_error": "Provider not configured",
-                    "last_success_ms": None,
-                    "rate_limit_remaining": None,
-                    "rate_limit_reset_ms": None,
-                    "concurrency_used": 0,
-                    "concurrency_limit": 5,
-                })
+                health_data.append(_unconfigured_health(provider_id, descriptor))
+                continue
+            admission = getattr(provider, "admission_controller", lambda: None)()
+            snapshot = getattr(admission, "health_snapshot", None)
+            if snapshot is None:
+                health_data.append(_unconfigured_health(provider_id, descriptor))
+                continue
+            entry = dict(snapshot())
+            entry["display_name"] = descriptor.display_name
+            health_data.append(entry)
         return _no_store({"providers": health_data})
     finally:
         await lease.release()
+
+
+def _unconfigured_health(
+    provider_id: str, descriptor: ProviderDescriptor
+) -> JsonObject:
+    """Return a placeholder health row for a provider with no live controller."""
+    return {
+        "provider_id": provider_id,
+        "display_name": descriptor.display_name,
+        "is_healthy": False,
+        "success_rate": 0.0,
+        "p50_latency_ms": None,
+        "p95_latency_ms": None,
+        "current_episode": "not_configured",
+        "last_error": "Provider not configured",
+        "last_success_ms": None,
+        "rate_limit_remaining": None,
+        "rate_limit_reset_ms": None,
+        "concurrency_used": 0,
+        "concurrency_limit": 5,
+    }
 
 
 def _no_store(payload: JsonValue) -> JSONResponse:
