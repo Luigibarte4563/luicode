@@ -79,6 +79,7 @@ class OpenAIChatProvider(BaseProvider):
             log_raw_sse_events=config.log_raw_sse_events,
             log_api_error_tracebacks=config.log_api_error_tracebacks,
             endpoint_transport=endpoint_transport,
+            stream_holdback_seconds=config.stream_holdback_seconds,
         )
 
     async def cleanup(self) -> None:

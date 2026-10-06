@@ -108,10 +108,16 @@ async def traced_async_stream(
     complete_event: str,
     interrupted_event: str,
     chunk_event: str | None = None,
+    first_chunk_event: str | None = None,
     chunk_interval: int = 250,
     extra: Mapping[str, Any] | None = None,
 ) -> AsyncGenerator[str]:
-    """Emit TRACE rows when a text stream completes, fails, cancels, or periodically."""
+    """Emit TRACE rows when a text stream completes, fails, cancels, or periodically.
+
+    ``first_chunk_event`` records time-to-first-token: it fires exactly once,
+    on the first chunk that reaches the client, so its ``time`` can be differenced
+    against the ingress ``request.received`` row to measure TTFT directly.
+    """
     common = dict(extra or {})
     count = 0
     nbytes = 0
@@ -120,6 +126,15 @@ async def traced_async_stream(
         async for chunk in agen:
             count += 1
             nbytes += len(chunk.encode("utf-8", errors="replace"))
+            if first_chunk_event is not None and count == 1:
+                trace_event(
+                    stage=stage,
+                    event=first_chunk_event,
+                    source=source,
+                    stream_chunks_so_far=count,
+                    stream_bytes_so_far=nbytes,
+                    **common,
+                )
             if chunk_event and chunk_interval > 0 and count % chunk_interval == 0:
                 trace_event(
                     stage=stage,

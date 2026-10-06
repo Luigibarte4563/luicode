@@ -100,6 +100,7 @@ class GitHubCopilotProvider(BaseProvider):
             log_raw_sse_events=config.log_raw_sse_events,
             endpoint_transport=self._openai_pool,
             event_adapter_factory=CopilotResponsesEvents,
+            stream_holdback_seconds=config.stream_holdback_seconds,
         )
         self._chats: dict[str, tuple[CopilotModel, OpenAIChatTransport]] = {}
         self._condition = asyncio.Condition()
@@ -177,6 +178,7 @@ class GitHubCopilotProvider(BaseProvider):
                 admission=self._admission,
                 client=self._client,
                 endpoint_transport=self._openai_pool,
+                stream_holdback_seconds=self._config.stream_holdback_seconds,
             )
             self._chats[model.info.model_id] = (model, transport)
             return transport
@@ -215,6 +217,9 @@ class GitHubCopilotProvider(BaseProvider):
                             replay_scope=REPLAY_SCOPE,
                             read_timeout_s=self._config.http_read_timeout,
                             capabilities=lease.model.messages,
+                            stream_holdback_seconds=(
+                                self._config.stream_holdback_seconds
+                            ),
                         )
                         endpoint = _MessagesEndpoint(lease, http)
                         if isinstance(request, MessagesRequest):

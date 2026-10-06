@@ -20,6 +20,7 @@ from luicode.providers.anthropic_messages.transport import (
 )
 from luicode.providers.endpoint_types import HttpEndpoint
 from luicode.providers.http import maybe_await_aclose
+from luicode.providers.stream_recovery import EARLY_HOLDBACK_SECONDS
 from tests.providers.support import immediate_admission
 
 
@@ -251,6 +252,8 @@ def _transport(
         provider_name="TEST",
         replay_scope="test/messages",
         read_timeout_s=3,
+        # Pre-commit retry assertions need the opt-in invisible-retry window.
+        stream_holdback_seconds=EARLY_HOLDBACK_SECONDS,
     )
 
 

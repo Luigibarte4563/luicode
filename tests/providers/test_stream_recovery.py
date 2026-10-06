@@ -1,14 +1,25 @@
 """Provider stream commit-boundary and recovery policy."""
 
 from luicode.providers.stream_recovery import (
+    DEFAULT_HOLDBACK_SECONDS,
+    EARLY_HOLDBACK_SECONDS,
     RecoveryController,
     RecoveryFailureAction,
     RecoveryHoldbackBuffer,
 )
 
 
+def _holding_controller() -> RecoveryController:
+    """Build a controller with the invisible-retry window explicitly enabled.
+
+    Holdback is opt-in (``PROVIDER_STREAM_HOLDBACK_SECONDS`` defaults to 0), so
+    tests that exercise uncommitted-buffer recovery must ask for the window.
+    """
+    return RecoveryController(holdback_seconds=EARLY_HOLDBACK_SECONDS)
+
+
 def test_early_retry_discards_uncommitted_holdback() -> None:
-    controller = RecoveryController()
+    controller = _holding_controller()
 
     assert controller.push("hidden") == []
     decision = controller.advance_failure(
@@ -28,7 +39,7 @@ def test_early_retry_discards_uncommitted_holdback() -> None:
 
 
 def test_early_retry_requires_remaining_execution_budget() -> None:
-    controller = RecoveryController()
+    controller = _holding_controller()
     assert controller.push("hidden") == []
 
     decision = controller.advance_failure(
@@ -45,7 +56,7 @@ def test_early_retry_requires_remaining_execution_budget() -> None:
 
 
 def test_last_attempt_is_reserved_for_partial_output_recovery() -> None:
-    controller = RecoveryController()
+    controller = _holding_controller()
     assert controller.push("partial") == []
 
     decision = controller.advance_failure(
@@ -88,7 +99,7 @@ def test_statusless_transient_api_error_allows_early_retry() -> None:
 
 
 def test_committed_output_allows_midstream_recovery() -> None:
-    controller = RecoveryController()
+    controller = _holding_controller()
 
     assert controller.push("event: content_block_delta\n\n") == []
     assert controller.flush() == ["event: content_block_delta\n\n"]
@@ -107,7 +118,7 @@ def test_committed_output_allows_midstream_recovery() -> None:
 
 
 def test_uncommitted_complete_tool_can_be_salvaged() -> None:
-    controller = RecoveryController()
+    controller = _holding_controller()
 
     assert controller.push("event: content_block_delta\n\n") == []
     decision = controller.advance_failure(
@@ -159,7 +170,9 @@ def test_holdback_buffers_until_delay_then_commits() -> None:
 
 
 def test_holdback_flushes_at_internal_buffer_cap() -> None:
-    holdback = RecoveryHoldbackBuffer(max_bytes=5, now=lambda: 1.0)
+    holdback = RecoveryHoldbackBuffer(
+        holdback_seconds=EARLY_HOLDBACK_SECONDS, max_bytes=5, now=lambda: 1.0
+    )
 
     assert holdback.push("ab") == []
     assert holdback.push("cde") == ["ab", "cde"]
@@ -167,9 +180,37 @@ def test_holdback_flushes_at_internal_buffer_cap() -> None:
 
 
 def test_holdback_discard_drops_uncommitted_events() -> None:
-    holdback = RecoveryHoldbackBuffer(now=lambda: 1.0)
+    holdback = RecoveryHoldbackBuffer(
+        holdback_seconds=EARLY_HOLDBACK_SECONDS, now=lambda: 1.0
+    )
 
     assert holdback.push("hidden") == []
     holdback.discard()
 
     assert holdback.flush() == []
+
+
+def test_holdback_is_disabled_by_default() -> None:
+    """Latency-first default: the first event reaches the client immediately."""
+    assert DEFAULT_HOLDBACK_SECONDS == 0.0
+
+    controller = RecoveryController()
+
+    assert controller.push("first") == ["first"]
+    assert controller.committed
+
+
+def test_disabled_holdback_still_passes_through_later_events() -> None:
+    controller = RecoveryController()
+
+    assert controller.push("first") == ["first"]
+    assert controller.push("second") == ["second"]
+
+
+def test_disabled_holdback_rejects_negative_window() -> None:
+    try:
+        RecoveryController(holdback_seconds=-0.1)
+    except ValueError as error:
+        assert "holdback_seconds" in str(error)
+    else:
+        raise AssertionError("Negative holdback window must be rejected.")

@@ -1109,7 +1109,7 @@ async def test_midstream_native_tool_suffix_failure_recovers_without_duplication
     async def recovered_stream():
         yield _content_chunk(recovered, finish_reason="tool_calls")
 
-    def immediate_holdback():
+    def immediate_holdback(**_kwargs):
         return RecoveryHoldbackBuffer(holdback_seconds=0.0)
 
     with (

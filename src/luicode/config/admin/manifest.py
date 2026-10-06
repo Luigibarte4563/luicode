@@ -225,6 +225,19 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         settings_attr="provider_max_concurrency",
     ),
     ConfigFieldSpec(
+        "PROVIDER_STREAM_HOLDBACK_SECONDS",
+        "Provider Stream Holdback (s)",
+        "runtime",
+        "number",
+        settings_attr="provider_stream_holdback_seconds",
+        advanced=True,
+        description=(
+            "Retains the opening of each stream this many seconds so an early "
+            "upstream cutoff can be retried invisibly. Adds that delay to every "
+            "request. 0 disables it."
+        ),
+    ),
+    ConfigFieldSpec(
         "PROVIDER_PROGRESS_TIMEOUT",
         "Provider Progress Timeout",
         "runtime",

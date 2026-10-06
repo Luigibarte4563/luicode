@@ -93,6 +93,7 @@ from luicode.providers.request_recovery import (
     RequestRecovery,
 )
 from luicode.providers.stream_recovery import (
+    DEFAULT_HOLDBACK_SECONDS,
     RecoveryController,
     RecoveryFailureAction,
     TruncatedProviderStreamError,
@@ -532,6 +533,7 @@ class OpenAIChatTransport:
         log_raw_sse_events: bool,
         log_api_error_tracebacks: bool,
         endpoint_transport: httpx2.AsyncBaseTransport | None = None,
+        stream_holdback_seconds: float = DEFAULT_HOLDBACK_SECONDS,
     ) -> None:
         self._client = client
         self._admission = admission
@@ -543,6 +545,7 @@ class OpenAIChatTransport:
         self._log_api_error_tracebacks = log_api_error_tracebacks
         self._endpoint_transport = endpoint_transport
         self._model_output_caps: dict[str, int] = {}
+        self._stream_holdback_seconds = stream_holdback_seconds
 
     def _log_stream_transport_error(
         self,
@@ -967,7 +970,9 @@ class _OpenAIChatStreamRunner:
         execution = self._transport._admission.start_execution(
             request_id=self._request_id
         )
-        recovery = RecoveryController()
+        recovery = RecoveryController(
+            holdback_seconds=self._transport._stream_holdback_seconds
+        )
         request_recovery = RequestRecovery(
             execution, endpoint=self._endpoint, stream=recovery
         )

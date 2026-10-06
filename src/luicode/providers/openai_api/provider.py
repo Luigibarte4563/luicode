@@ -99,6 +99,7 @@ class OpenAIAPIProvider(BaseProvider):
             read_timeout_s=config.http_read_timeout,
             log_raw_sse_events=config.log_raw_sse_events,
             request_correction=_sampling_retry_body,
+            stream_holdback_seconds=config.stream_holdback_seconds,
         )
 
     async def cleanup(self) -> None:

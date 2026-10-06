@@ -29,6 +29,7 @@ from luicode.providers.openai_chat import (
     OpenAIChatRequestPolicy,
 )
 from luicode.providers.openai_responses import OpenAIResponsesTransport
+from luicode.providers.stream_recovery import EARLY_HOLDBACK_SECONDS
 from tests.providers.support import make_provider_config
 from tests.providers.test_anthropic_messages_transport import _events
 from tests.providers.test_anthropic_messages_transport import (
@@ -115,6 +116,7 @@ async def _transport(protocol, responder, *, endpoint=None):
                 read_timeout_s=3,
                 log_raw_sse_events=False,
                 endpoint_transport=pool,
+                stream_holdback_seconds=EARLY_HOLDBACK_SECONDS,
             )
         else:
             provider = OpenAIChatProvider(

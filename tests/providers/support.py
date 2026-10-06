@@ -16,6 +16,7 @@ from luicode.providers.openai_chat import (
     OpenAIChatProvider,
     create_openai_chat_provider,
 )
+from luicode.providers.stream_recovery import EARLY_HOLDBACK_SECONDS
 
 REASONING_DEFAULT = ReasoningPolicy.provider_default()
 REASONING_ON = ReasoningPolicy.on()
@@ -61,8 +62,15 @@ def make_provider_config(
     proxy: str | None = None,
     log_raw_sse_events: bool = False,
     log_api_error_tracebacks: bool = False,
+    stream_holdback_seconds: float = EARLY_HOLDBACK_SECONDS,
 ) -> ProviderConfig:
-    """Build a complete resolved config for isolated provider tests."""
+    """Build a complete resolved config for isolated provider tests.
+
+    ``stream_holdback_seconds`` enables the invisible-retry window by default so
+    provider recovery tests exercise the same code path operators get by opting
+    in via ``PROVIDER_STREAM_HOLDBACK_SECONDS``. Production defaults to ``0.0``;
+    tests that assert latency-first behaviour pass ``0.0`` explicitly.
+    """
 
     return ProviderConfig(
         api_key=api_key,
@@ -76,6 +84,7 @@ def make_provider_config(
         proxy=proxy,
         log_raw_sse_events=log_raw_sse_events,
         log_api_error_tracebacks=log_api_error_tracebacks,
+        stream_holdback_seconds=stream_holdback_seconds,
     )
 
 

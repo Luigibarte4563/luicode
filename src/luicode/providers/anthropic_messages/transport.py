@@ -70,6 +70,7 @@ from luicode.providers.request_recovery import (
     RequestRecovery,
 )
 from luicode.providers.stream_recovery import (
+    DEFAULT_HOLDBACK_SECONDS,
     RecoveryController,
     RecoveryFailureAction,
 )
@@ -95,6 +96,7 @@ class AnthropicMessagesTransport:
         replay_scope: str,
         read_timeout_s: float,
         capabilities: MessagesModelCapabilities = MessagesModelCapabilities(),
+        stream_holdback_seconds: float = DEFAULT_HOLDBACK_SECONDS,
     ) -> None:
         self._client = client
         self._admission = admission
@@ -102,6 +104,7 @@ class AnthropicMessagesTransport:
         self._replay_scope = replay_scope
         self._read_timeout_s = read_timeout_s
         self._capabilities = capabilities
+        self._stream_holdback_seconds = stream_holdback_seconds
 
     def _messages_body(
         self,
@@ -256,7 +259,7 @@ class AnthropicMessagesTransport:
         presenter_factory: Callable[[ReplayOrigin], _Presenter],
         reasoning_correction: ReasoningCorrection | None = None,
     ) -> AsyncIterator[str]:
-        recovery = RecoveryController()
+        recovery = RecoveryController(holdback_seconds=self._stream_holdback_seconds)
         request_endpoint = RequestEndpoint(endpoint_context)
         request_recovery = RequestRecovery(
             execution, endpoint=request_endpoint, stream=recovery

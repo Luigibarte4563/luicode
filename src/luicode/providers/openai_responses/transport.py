@@ -69,6 +69,7 @@ from luicode.providers.request_recovery import (
     RequestRecovery,
 )
 from luicode.providers.stream_recovery import (
+    DEFAULT_HOLDBACK_SECONDS,
     RecoveryController,
     RecoveryFailureAction,
 )
@@ -106,6 +107,7 @@ class OpenAIResponsesTransport:
         | None = None,
         omitted_request_fields: frozenset[str] = frozenset(),
         tool_policy: ResponsesToolPolicy = ResponsesToolPolicy(),
+        stream_holdback_seconds: float = DEFAULT_HOLDBACK_SECONDS,
     ) -> None:
         self._client = client
         self._endpoint_transport = endpoint_transport
@@ -117,6 +119,7 @@ class OpenAIResponsesTransport:
         self._provider_name = provider_name
         self._read_timeout_s = read_timeout_s
         self._log_raw_sse_events = log_raw_sse_events
+        self._stream_holdback_seconds = stream_holdback_seconds
 
     def stream_messages(
         self,
@@ -312,7 +315,7 @@ class OpenAIResponsesTransport:
         extra_headers: Mapping[str, str] | None = None,
         reasoning_correction: ReasoningCorrection | None = None,
     ) -> AsyncIterator[str]:
-        recovery = RecoveryController()
+        recovery = RecoveryController(holdback_seconds=self._stream_holdback_seconds)
         request_recovery = RequestRecovery(
             execution, endpoint=endpoint, stream=recovery
         )

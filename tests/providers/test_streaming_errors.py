@@ -42,7 +42,10 @@ from luicode.providers.openai_chat.transport import (
     _reserved_anthropic_tool_ids,
 )
 from luicode.providers.request_recovery import RequestRecovery
-from luicode.providers.stream_recovery import TruncatedProviderStreamError
+from luicode.providers.stream_recovery import (
+    EARLY_HOLDBACK_SECONDS,
+    TruncatedProviderStreamError,
+)
 from tests.providers.request_factory import make_messages_request
 from tests.providers.support import (
     REASONING_OFF,
@@ -129,6 +132,8 @@ def _make_provider():
         base_url="https://test.api.nvidia.com/v1",
         rate_limit=10,
         rate_window=60,
+        # Replay/continuation assertions need the opt-in invisible-retry window.
+        stream_holdback_seconds=EARLY_HOLDBACK_SECONDS,
     )
     return NvidiaNimProvider(
         config,

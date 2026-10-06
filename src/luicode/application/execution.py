@@ -528,5 +528,10 @@ class ProviderExecutor:
                 else "luicode.api.response.stream_interrupted"
             ),
             chunk_event=None,
+            first_chunk_event=(
+                "luicode.api.responses.stream_first_chunk"
+                if wire_api == "responses"
+                else "luicode.api.response.stream_first_chunk"
+            ),
             extra=stream_trace,
         )

@@ -537,12 +537,22 @@ class Settings(BaseModel):
         default=None, validation_alias="OLLAMA_CLOUD_PROXY"
     )
     # ==================== Provider Rate Limiting ====================
-    provider_rate_limit: int = Field(default=1, validation_alias="PROVIDER_RATE_LIMIT")
+    provider_rate_limit: int = Field(default=60, validation_alias="PROVIDER_RATE_LIMIT")
     provider_rate_window: int = Field(
-        default=2, validation_alias="PROVIDER_RATE_WINDOW"
+        default=60, validation_alias="PROVIDER_RATE_WINDOW"
     )
     provider_max_concurrency: int = Field(
-        default=2, validation_alias="PROVIDER_MAX_CONCURRENCY"
+        default=8, validation_alias="PROVIDER_MAX_CONCURRENCY"
+    )
+    provider_stream_holdback_seconds: float = Field(
+        default=0.0,
+        ge=0.0,
+        allow_inf_nan=False,
+        # Opt-in invisible-retry window. When positive, the first
+        # PROVIDER_STREAM_HOLDBACK_SECONDS of SSE are retained so an early
+        # upstream cutoff can be retried without the client observing a partial
+        # response. Every request pays this delay, so it defaults to disabled.
+        validation_alias="PROVIDER_STREAM_HOLDBACK_SECONDS",
     )
     provider_progress_timeout: float = Field(
         default=600.0,

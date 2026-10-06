@@ -33,6 +33,7 @@ from luicode.providers.openai_chat.stream_output import (
     ResponsesChatStreamOutput,
 )
 from luicode.providers.openai_responses import OpenAIResponsesTransport
+from luicode.providers.stream_recovery import EARLY_HOLDBACK_SECONDS
 from tests.core.openai_responses.test_client_tool_discovery import AGENTS, SEARCH
 from tests.providers.support import REASONING_ON, immediate_admission
 
@@ -207,6 +208,8 @@ def _transport(
         read_timeout_s=120.0,
         log_raw_sse_events=False,
         tool_policy=tool_policy,
+        # Pre-commit retry assertions need the opt-in invisible-retry window.
+        stream_holdback_seconds=EARLY_HOLDBACK_SECONDS,
     )
 
 

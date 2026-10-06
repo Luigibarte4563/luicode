@@ -117,9 +117,10 @@ def test_direct_settings_still_reject_retired_provider():
 def test_settings_defaults_are_valid_and_nonempty() -> None:
     settings = Settings()
 
-    assert settings.provider_rate_limit == 1
-    assert settings.provider_rate_window == 2
-    assert settings.provider_max_concurrency == 2
+    assert settings.provider_rate_limit == 60
+    assert settings.provider_rate_window == 60
+    assert settings.provider_max_concurrency == 8
+    assert settings.provider_stream_holdback_seconds == 0.0
     assert settings.provider_progress_timeout == 600.0
     assert settings.http_read_timeout == 120.0
     assert settings.http_write_timeout == 10.0
@@ -160,7 +161,7 @@ def test_direct_settings_construction_performs_no_environment_io(
     settings = Settings()
 
     assert settings.model.startswith("nvidia_nim/")
-    assert settings.provider_rate_limit == 1
+    assert settings.provider_rate_limit == 60
 
 
 @pytest.mark.parametrize(

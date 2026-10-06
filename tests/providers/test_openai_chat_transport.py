@@ -19,6 +19,7 @@ from luicode.providers.openai_chat import (
     OpenAIChatRequestPolicy,
     OpenAIChatTransport,
 )
+from luicode.providers.stream_recovery import EARLY_HOLDBACK_SECONDS
 from tests.providers.request_factory import make_messages_request
 
 pytestmark = pytest.mark.asyncio
@@ -43,6 +44,8 @@ def _transport(client: AsyncOpenAI) -> OpenAIChatTransport:
         read_timeout_s=2,
         log_raw_sse_events=False,
         log_api_error_tracebacks=False,
+        # Pre-commit retry assertions need the opt-in invisible-retry window.
+        stream_holdback_seconds=EARLY_HOLDBACK_SECONDS,
     )
 
 

@@ -24,6 +24,7 @@ from luicode.providers.openai_chat import (
     OpenAIChatRequestPolicy,
 )
 from luicode.providers.openai_responses import OpenAIResponsesTransport
+from luicode.providers.stream_recovery import EARLY_HOLDBACK_SECONDS
 from tests.providers.support import immediate_admission, make_provider_config
 
 
@@ -100,6 +101,7 @@ def _transport(
             read_timeout_s=3,
             log_raw_sse_events=False,
             endpoint_transport=pool,
+            stream_holdback_seconds=EARLY_HOLDBACK_SECONDS,
         )
     return OpenAIChatProvider(
         make_provider_config(None, "https://original.invalid"),

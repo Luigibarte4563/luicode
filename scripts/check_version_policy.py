@@ -63,6 +63,52 @@ def next_version(previous: str, kind: str) -> str:
     raise ValueError(f"Invalid release kind: {kind}")
 
 
+VERSION_FILE = "src/luicode/_version/__init__.py"
+VERSION_ASSIGNMENT = re.compile(r"""__version__\s*=\s*["']([^"']+)["']""")
+
+
+def previous_version(head: str) -> str | None:
+    """Return the newest stable release version already tagged in history."""
+    versions = []
+    for tag in git("tag", "--list", "v*", "--merged", head).splitlines():
+        name = tag.removeprefix("v")
+        if VERSION.fullmatch(name):
+            versions.append(name)
+    if not versions:
+        return None
+    # VERSION matches only X.Y.Z, so tuple ordering is numeric ordering.
+    return max(versions, key=lambda value: tuple(map(int, value.split("."))))
+
+
+def check_version_bump(head: str, kind: str | None, previous: str | None) -> None:
+    """Fail a release whose committed __version__ disagrees with its tag.
+
+    The wheel and sdist carry this file's value, so a mismatch only surfaces
+    during publication, after the tag is already pushed.
+    """
+    if kind is None:
+        return
+    try:
+        declared_source = git("show", f"{head}:{VERSION_FILE}")
+    except subprocess.CalledProcessError:
+        raise ValueError(
+            f"{VERSION_FILE} must be tracked by the release commit"
+        ) from None
+    match = VERSION_ASSIGNMENT.search(declared_source)
+    if match is None:
+        raise ValueError(f"{VERSION_FILE} must declare __version__")
+    declared = match.group(1)
+    if previous is None:
+        # No baseline tag exists yet, so there is nothing to compute against.
+        return
+    expected = next_version(previous, kind)
+    if declared != expected:
+        raise ValueError(
+            f"__version__ is {declared} but a {kind} release after "
+            f"{previous} must set it to {expected}"
+        )
+
+
 def check_packaging(head: str) -> None:
     project = tomllib.loads(git("show", f"{head}:pyproject.toml"))["project"]
     if (
@@ -92,6 +138,7 @@ def check(base: str, head: str, title: str) -> None:
     print("Release changes: " + (", ".join(release_paths(paths)) or "none"))
     kind = release_kind(title, paths)
     check_packaging(head)
+    check_version_bump(head, kind, previous_version(head))
     print(f"Version policy passed: {kind or 'no release'}")
 
 

@@ -9,6 +9,14 @@ from .failure_policy import RetryableProviderProtocolError
 
 EARLY_HOLDBACK_SECONDS = 0.75
 RECOVERY_BUFFER_MAX_BYTES = 65_536
+DEFAULT_HOLDBACK_SECONDS = 0.0
+"""Holdback applied when an operator configures none.
+
+Disabled by default: the window protects against rare early upstream cutoffs
+but is charged on every request, so it is opt-in via
+``PROVIDER_STREAM_HOLDBACK_SECONDS``. ``EARLY_HOLDBACK_SECONDS`` remains the
+reference value for operators who opt back in.
+"""
 
 
 class TruncatedProviderStreamError(RetryableProviderProtocolError):
@@ -34,15 +42,23 @@ class RecoveryDecision:
 
 
 class RecoveryHoldbackBuffer:
-    """Briefly retain SSE so early cutoffs can be retried invisibly."""
+    """Briefly retain SSE so early cutoffs can be retried invisibly.
+
+    ``holdback_seconds=0`` commits on the first pushed event, so callers pay no
+    latency for the invisible-retry window unless they explicitly ask for one.
+    """
 
     def __init__(
         self,
         *,
-        holdback_seconds: float = EARLY_HOLDBACK_SECONDS,
+        holdback_seconds: float = DEFAULT_HOLDBACK_SECONDS,
         max_bytes: int = RECOVERY_BUFFER_MAX_BYTES,
         now: Callable[[], float] | None = None,
     ) -> None:
+        if holdback_seconds < 0:
+            raise ValueError("holdback_seconds must be >= 0")
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be > 0")
         self._holdback_seconds = holdback_seconds
         self._max_bytes = max_bytes
         self._now = now or time.monotonic
@@ -86,10 +102,22 @@ class RecoveryHoldbackBuffer:
 
 
 class RecoveryController:
-    """Own commit-boundary holdback for one provider stream lifecycle."""
+    """Own commit-boundary holdback for one provider stream lifecycle.
 
-    def __init__(self) -> None:
-        self._holdback = RecoveryHoldbackBuffer()
+    ``holdback_seconds`` is the invisible-retry window. It defaults to ``0.0``
+    so no request pays a latency tax for a retry that rarely happens; operators
+    who want early-cutoff retries can raise it via configuration.
+    """
+
+    def __init__(self, *, holdback_seconds: float = DEFAULT_HOLDBACK_SECONDS) -> None:
+        if holdback_seconds < 0:
+            raise ValueError("holdback_seconds must be >= 0")
+        self._holdback_seconds = holdback_seconds
+        self._holdback = self._new_holdback()
+
+    def _new_holdback(self) -> RecoveryHoldbackBuffer:
+        """Build a buffer honoring this controller's configured window."""
+        return RecoveryHoldbackBuffer(holdback_seconds=self._holdback_seconds)
 
     @property
     def committed(self) -> bool:
@@ -136,7 +164,7 @@ class RecoveryController:
             and not reserve_last_attempt_for_recovery
         ):
             self._holdback.discard()
-            self._holdback = RecoveryHoldbackBuffer()
+            self._holdback = self._new_holdback()
             return RecoveryDecision(
                 action=RecoveryFailureAction.EARLY_RETRY,
                 retryable=True,
