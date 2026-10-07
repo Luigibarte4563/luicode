@@ -1,7 +1,7 @@
 """Local admin UI routes and APIs."""
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from pathlib import Path
 
 import httpx
@@ -13,6 +13,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,7 @@ from luicode.application.connected_accounts import (
 from luicode.application.errors import ApplicationError
 from luicode.application.model_catalog import read_model_catalog
 from luicode.application.model_metadata import ProviderModelRefreshResult
+from luicode.application.session_events import EventOverflowError
 from luicode.config.admin.manifest import FIELD_BY_KEY
 from luicode.config.provider_catalog import (
     PROVIDER_CATALOG,
@@ -552,6 +554,43 @@ async def usage_optimizations(
             optimization=optimization,
         )
     )
+
+
+@router.get(
+    "/admin/api/usage/events",
+    response_class=EventSourceResponse,
+    # The loopback check must run as a dependency: raising once the stream has
+    # started cannot be converted into a 403 response.
+    dependencies=[Depends(require_loopback_admin)],
+)
+async def usage_events(
+    services: ApiServices = Depends(get_services),
+) -> AsyncGenerator[ServerSentEvent]:
+    """Stream committed usage writes so the Admin Usage tab can refresh live."""
+    subscription = services.admin.subscribe_usage_events()
+    try:
+        yield ServerSentEvent(
+            event="feed.ready",
+            id=str(subscription.cursor),
+            retry=1000,
+            data={"cursor": subscription.cursor},
+        )
+        try:
+            async for event in subscription:
+                yield ServerSentEvent(
+                    event=event.event,
+                    id=str(event.id),
+                    data={**event.data, "cursor": event.id},
+                )
+        except EventOverflowError as exc:
+            # A slow observer must reconnect from an authoritative snapshot.
+            yield ServerSentEvent(
+                event="feed.resync_required",
+                id=str(exc.cursor),
+                data={"cursor": exc.cursor},
+            )
+    finally:
+        await subscription.aclose()
 
 
 @router.get("/admin/api/providers/health")

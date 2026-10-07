@@ -298,10 +298,11 @@ async def my_handler(browser_tools: BrowserToolsPort):
 | **Token counts** | Input/output/cache tokens per request, provider, model, and agent |
 | **Cost estimation** | Bundled price table (src/luicode/application/usage/data/pricing.toml) with user overrides (~/.luicode/pricing.override.toml) |
 | **Optimization savings** | Real token counts from intercepted requests (not hardcoded constants) |
-| **Time series** | Hourly buckets for requests, tokens, and cost (last 24h) |
+| **Time series** | Requests, tokens, and cost bucketed to the selected range (1 min to 6 h) |
+| **Live updates** | SSE feed on committed rows; the tab refreshes itself, with polling backstops for provider health and missed events |
 
 ### Request Log
-- **Searchable & paginated** — Filter by provider, agent, outcome, time range
+- **Live & paginated** — New rows appear without a reload; filters and page are preserved
 - **Per-request details** — Request ID, latency, TTFB, fallback chain, attempt count
 - **Cost per request** — NULL when price unknown, never shows $0.00 for paid models
 - **Redacted by default** — Payload content not stored; opt-in for debug
