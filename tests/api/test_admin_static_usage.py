@@ -11,6 +11,35 @@ def _read(name: str) -> str:
     return (STATIC / name).read_text(encoding="utf-8")
 
 
+def _usage_section() -> str:
+    """Return only the usage view, so another section cannot satisfy a check."""
+    markup = _read("index.html")
+    body = markup.split('<section id="view-usage"', 1)[1]
+    return body.split('<section id="view-code"', 1)[0]
+
+
+def test_usage_view_has_no_page_header_of_its_own():
+    """The shell topbar owns the page title; a nested one duplicates it."""
+    view = _usage_section()
+    assert 'class="topbar"' not in view
+    assert "Usage Dashboard" not in view
+
+
+def test_usage_view_keeps_its_range_and_live_controls():
+    """Moving the controls out of the header must not drop them."""
+    view = _usage_section()
+    assert 'id="usageSinceHours"' in view
+    assert 'id="usageLiveState"' in view
+    assert 'id="usageLiveText"' in view
+
+
+def test_admin_page_shows_one_usage_title():
+    """The shell topbar is the single source of the page title."""
+    markup = _read("index.html")
+    assert markup.count('<header class="topbar">') == 1
+    assert 'id="pageTitle"' in markup
+
+
 def test_admin_shell_activates_and_deactivates_the_usage_view():
     admin = _read("admin.js")
     assert 'if (activeView.id === "usage") window.UsageDashboard.activate();' in admin

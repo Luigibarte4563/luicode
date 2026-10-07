@@ -159,24 +159,19 @@
           </section>
 
           <section id="view-usage" class="admin-view" data-view="usage" hidden>
-            <header class="topbar">
-              <div class="page-heading">
-                <h2>Usage Dashboard</h2>
+            <div class="usage-filters">
+              <label>Since: <select id="usageSinceHours" onchange="loadSummary(); loadRequests(0);">
+                <option value="1">Last hour</option>
+                <option value="6">Last 6 hours</option>
+                <option value="24" selected>Last 24 hours</option>
+                <option value="168">Last 7 days</option>
+                <option value="720">Last 30 days</option>
+              </select></label>
+              <div id="usageLiveState" class="usage-live is-down" role="status" aria-live="polite">
+                <span class="usage-live-dot" aria-hidden="true"></span>
+                <span id="usageLiveText">Connecting…</span>
               </div>
-              <div class="usage-filters">
-                <label>Since: <select id="usageSinceHours" onchange="loadSummary(); loadRequests(0);">
-                  <option value="1">Last hour</option>
-                  <option value="6">Last 6 hours</option>
-                  <option value="24" selected>Last 24 hours</option>
-                  <option value="168">Last 7 days</option>
-                  <option value="720">Last 30 days</option>
-                </select></label>
-                <div id="usageLiveState" class="usage-live is-down" role="status" aria-live="polite">
-                  <span class="usage-live-dot" aria-hidden="true"></span>
-                  <span id="usageLiveText">Connecting…</span>
-                </div>
-              </div>
-            </header>
+            </div>
 
             <div class="usage-grid">
               <div class="usage-stat">

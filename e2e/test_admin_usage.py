@@ -31,6 +31,15 @@ def test_usage_tab_connects_its_live_feed(page: Page, admin_base_url: str) -> No
     assert page.evaluate("() => window.openFeeds") == 1
 
 
+def test_usage_tab_shows_the_page_title_exactly_once(
+    page: Page, admin_base_url: str
+) -> None:
+    """The view must not repeat the heading the shell topbar already renders."""
+    _open(page, admin_base_url)
+    expect(page.locator("#pageTitle")).to_have_text("Usage Dashboard")
+    assert page.locator("#view-usage h2").count() == 0
+
+
 def test_committed_usage_appears_without_a_reload(
     page: Page, admin_base_url: str, usage_control: UsageControl
 ) -> None:
