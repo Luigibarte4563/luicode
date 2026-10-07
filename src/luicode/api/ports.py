@@ -12,6 +12,7 @@ from luicode.application.connected_accounts import (
 )
 from luicode.application.model_metadata import ProviderModelRefreshResult
 from luicode.application.ports import RequestRuntimePort, TaskController
+from luicode.application.session_events import EventSubscription
 from luicode.application.usage import UsageSink
 from luicode.application.web_tools.ports import WebToolsPort
 from luicode.config.admin.state import ConfigInputValue, ValueState
@@ -89,6 +90,8 @@ class AdminRuntimePort(Protocol):
 
     @property
     def usage_sink(self) -> UsageSink: ...
+
+    def subscribe_usage_events(self) -> EventSubscription: ...
 
     async def usage_summary(self, since_hours: int) -> JsonObject: ...
 

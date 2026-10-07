@@ -300,6 +300,8 @@ function setActiveView(viewId, { scroll = false } = {}) {
   }
   if (activeView.id === "code") window.CodeSessions.activate(window.location.pathname);
   else window.CodeSessions.deactivate();
+  if (activeView.id === "usage") window.UsageDashboard.activate();
+  else window.UsageDashboard.deactivate();
   if (activeView.id === "integrations") {
     refreshClaudeIntegration();
     refreshJetBrainsIntegration();

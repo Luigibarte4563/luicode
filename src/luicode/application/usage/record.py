@@ -110,6 +110,15 @@ class RequestUsage:
             "cost_source": self.cost_source,
         }
 
+    def as_dict(self) -> dict[str, Any]:
+        """Convert to an API payload, keeping JSON values as JSON values.
+
+        Storage needs the fallback chain as text; a reader needs a list.
+        """
+        row = self.to_row()
+        row["fallback_path"] = list(self.fallback_path)
+        return row
+
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> RequestUsage:
         return cls(
@@ -166,6 +175,10 @@ class OptimizationSaving:
             "saved_cost_usd": self.saved_cost_usd,
             "cost_source": self.cost_source,
         }
+
+    def as_dict(self) -> dict[str, Any]:
+        """Convert to an API payload; every field here is already JSON."""
+        return self.to_row()
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> OptimizationSaving:

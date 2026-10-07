@@ -9,6 +9,7 @@ import time
 import traceback
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING, Literal, cast
@@ -28,6 +29,7 @@ from luicode.application.errors import (
 )
 from luicode.application.model_metadata import ProviderModelRefreshResult
 from luicode.application.ports import StopResult
+from luicode.application.session_events import EventPublisher, EventSubscription
 from luicode.application.usage import (
     OptimizationSaving,
     RequestUsage,
@@ -113,6 +115,9 @@ class _IntegrationUpdate:
 _PROVIDER_CHECK_FAILURE_MESSAGE = (
     "Could not refresh this provider's models. Verify its configuration and access."
 )
+
+# Bounded so one slow Admin observer is dropped instead of stalling the writer.
+USAGE_EVENT_QUEUE_SIZE = 64
 
 
 async def best_effort(
@@ -241,6 +246,7 @@ class ApplicationRuntime:
         )
         self._messaging_error: str | None = None
         self._usage_sink: UsageSink | None = None
+        self._usage_events: EventPublisher | None = None
 
     @property
     def settings(self) -> Settings:
@@ -254,6 +260,28 @@ class ApplicationRuntime:
             )
         return self._usage_sink
 
+    def subscribe_usage_events(self) -> EventSubscription:
+        """Return a live feed of committed usage writes for the Admin Usage tab."""
+        if self._usage_events is None:
+            self._usage_events = EventPublisher(queue_size=USAGE_EVENT_QUEUE_SIZE)
+        return self._usage_events.subscribe()
+
+    @property
+    def usage_event_publisher(self) -> EventPublisher | None:
+        """The live usage feed, or None while nothing observes usage."""
+        return self._usage_events
+
+    def _notify_usage_committed(self) -> None:
+        # Nothing observes usage until the Admin Usage tab opens its feed, so the
+        # publisher stays unallocated (and publishing stays free) until then.
+        if self._usage_events is None:
+            return
+        # A closed publisher means shutdown drained the feed; it is not an error.
+        with suppress(RuntimeError):
+            self._usage_events.publish(
+                "usage.updated", {"at_ms": int(time.time() * 1000)}
+            )
+
     async def _persist_usage_batch(
         self,
         requests: list[RequestUsage],
@@ -266,7 +294,11 @@ class ApplicationRuntime:
     async def usage_database(self) -> UsageDatabase:
         from luicode.runtime.usage_sqlite import get_usage_database
 
-        return await get_usage_database()
+        database = await get_usage_database()
+        # Announce committed rows rather than queued ones, so a live reader that
+        # reacts to the event never refetches before the rows are visible.
+        database.on_committed = self._notify_usage_committed
+        return database
 
     @staticmethod
     def _usage_window_ms(since_hours: int) -> int:
@@ -298,7 +330,7 @@ class ApplicationRuntime:
             offset=offset,
         )
         return {
-            "requests": [row.to_row() for row in rows],
+            "requests": [record.as_dict() for record in rows],
             "limit": limit,
             "offset": offset,
         }
@@ -317,7 +349,7 @@ class ApplicationRuntime:
             limit=limit,
         )
         return {
-            "optimizations": [row.to_row() for row in rows],
+            "optimizations": [record.as_dict() for record in rows],
             "limit": limit,
         }
 
@@ -1116,6 +1148,10 @@ class ApplicationRuntime:
             "usage_sink.close", self._usage_sink.close()
         ):
             return False
+        # Finish open Admin Usage feeds before the database stops committing.
+        if self._usage_events is not None:
+            self._usage_events.close()
+            self._usage_events = None
         if not await best_effort("usage_database.close", _close_usage_database()):
             return False
         if not self._provider_manager_closed:

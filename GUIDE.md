@@ -128,6 +128,23 @@ Each card has:
 
 The Usage Dashboard provides observability into token consumption, costs, and optimization effectiveness.
 
+### Live updates
+
+The tab is **live** while it is open. It subscribes to `/admin/api/usage/events`, a
+server-sent-events feed that fires once a batch of usage records is committed to
+SQLite, so the dashboard refreshes without a page reload.
+
+- A green **Live** dot with "updated Ns ago" confirms the feed is connected; an amber
+  **Reconnecting…** dot means it is not.
+- Updates arrive roughly a second after a request finishes (the usage writer flushes on
+  a ~1s batch interval), then refresh every visible panel within a fraction of a second.
+- Bursts of commits are coalesced, so a busy period still reads as a smooth stream.
+- Your panel selection, filters, and request-log page are preserved across updates — a
+  refresh never moves you off what you were reading.
+- A summary card flashes when its number actually changes.
+- Leaving the tab (or switching browser tabs) closes the connection. Provider health
+  refreshes on its own 10s cadence, and a 60s reconcile pass backstops a missed event.
+
 ### Overview Panel
 
 **Summary cards** show aggregated metrics for the selected time range (1h, 6h, 24h, 7d, 30d):
@@ -136,10 +153,13 @@ The Usage Dashboard provides observability into token consumption, costs, and op
 - Estimated cost (USD)
 - Unique providers and agents used
 
-**Time-series chart** (last 24 hours) with three lines:
-- Requests per hour
-- Tokens per hour (thousands)
-- Cost per hour (USD)
+**Time-series chart** over the selected range, with three lines:
+- Requests
+- Tokens (thousands)
+- Cost (USD)
+
+Bucket width follows the range so the chart stays readable: 1 minute for the last hour,
+5 minutes for 6 hours, 15 minutes for 24 hours, 6 hours for 7 and 30 days.
 
 ### Request Log Panel
 

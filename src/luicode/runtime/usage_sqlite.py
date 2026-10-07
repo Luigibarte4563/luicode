@@ -3,6 +3,7 @@
 import asyncio
 import sqlite3
 import time
+from collections.abc import Callable
 from contextlib import closing, suppress
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,6 @@ from luicode.application.usage.record import (
 )
 from luicode.config.paths import usage_database_path, usage_lock_path
 from luicode.core.interprocess_lock import InterprocessFileLock
-
-_USAGE_DB = usage_database_path()
-_USAGE_LOCK = usage_lock_path()
 
 _SCHEMA_VERSION = 1
 
@@ -92,19 +90,34 @@ AND id NOT IN (
 );
 """
 
+# Chart buckets, smallest first. The widest window that stays under the point
+# budget wins, so a one-hour view resolves per minute while a month resolves
+# per day instead of drawing an unusable 720-point line.
+_TIMESERIES_BUCKETS_MS = (
+    60_000,
+    5 * 60_000,
+    15 * 60_000,
+    60 * 60_000,
+    6 * 3600_000,
+    24 * 3600_000,
+)
+_TIMESERIES_MAX_POINTS = 120
+
 
 class UsageDatabase:
     """Async SQLite writer with background flush, matching code_sessions_sqlite.py."""
 
     def __init__(
         self,
-        db_path: Path = _USAGE_DB,
-        lock_path: Path = _USAGE_LOCK,
+        db_path: Path | None = None,
+        lock_path: Path | None = None,
         max_rows: int = 100000,
         retention_days: int = 90,
     ) -> None:
-        self._db_path = db_path
-        self._lock_path = lock_path
+        # Resolve paths per instance rather than at import, so the store always
+        # follows the current configuration instead of the process start-up one.
+        self._db_path = db_path if db_path is not None else usage_database_path()
+        self._lock_path = lock_path if lock_path is not None else usage_lock_path()
         self._max_rows = max_rows
         self._retention_ms = retention_days * 24 * 60 * 60 * 1000
         self._queue: asyncio.Queue[
@@ -112,7 +125,11 @@ class UsageDatabase:
         ] = asyncio.Queue()
         self._writer_task: asyncio.Task[None] | None = None
         self._closed = False
-        self._lock = InterprocessFileLock(lock_path)
+        self._lock = InterprocessFileLock(self._lock_path)
+        # Live Admin observers subscribe to committed rows, not queued ones, so
+        # they never refetch before the batch they were told about is visible.
+        self.on_committed: Callable[[], None] | None = None
+        self.commit_count = 0
 
     async def initialize(self) -> None:
         await self._run_migrations()
@@ -164,6 +181,7 @@ class UsageDatabase:
             try:
                 reqs, opts = await asyncio.wait_for(self._queue.get(), timeout=1.0)
                 await anyio.to_thread.run_sync(self._sync_write_batch, reqs, opts)
+                self._notify_committed()
                 # Periodic retention cleanup
                 if self._should_cleanup():
                     await anyio.to_thread.run_sync(self._sync_retention)
@@ -174,6 +192,15 @@ class UsageDatabase:
             except Exception:
                 # Swallow - never let persistence errors affect request path
                 pass
+
+    def _notify_committed(self) -> None:
+        """Announce visible rows to observers. Never raise into the writer loop."""
+        self.commit_count += 1
+        callback = self.on_committed
+        if callback is None:
+            return
+        with suppress(Exception):
+            callback()
 
     def _should_cleanup(self) -> bool:
         # Run retention ~once per hour
@@ -396,12 +423,12 @@ class UsageDatabase:
             )
             by_optimization = [dict(r) for r in cursor]
 
-            # Time series (hourly buckets for last 24h)
-            hour_ago = int(time.time() * 1000) - 24 * 60 * 60 * 1000
+            # Time series over the same window as the totals
+            bucket_ms = _timeseries_bucket_ms(since_ms)
             cursor = conn.execute(
-                """
+                f"""
                 SELECT
-                    (started_ms / 3600000) * 3600000 as bucket_ms,
+                    (started_ms / {bucket_ms}) * {bucket_ms} as bucket_ms,
                     COUNT(*) as requests,
                     SUM(input_tokens + output_tokens) as tokens,
                     SUM(CASE WHEN cost_usd IS NOT NULL THEN cost_usd ELSE 0 END) as cost
@@ -410,7 +437,7 @@ class UsageDatabase:
                 GROUP BY bucket_ms
                 ORDER BY bucket_ms
             """,
-                [hour_ago],
+                [since_ms if since_ms is not None else 0],
             )
             timeseries = [dict(r) for r in cursor]
 
@@ -429,19 +456,38 @@ class UsageDatabase:
             return row[0] if row and row[0] is not None else None
 
 
+def _timeseries_bucket_ms(since_ms: int | None) -> int:
+    """Pick the finest bucket that keeps a window under the point budget."""
+    if since_ms is None:
+        window_ms = 24 * 60 * 60 * 1000
+    else:
+        window_ms = max(int(time.time() * 1000) - since_ms, 0)
+    for bucket_ms in _TIMESERIES_BUCKETS_MS:
+        if window_ms // bucket_ms <= _TIMESERIES_MAX_POINTS:
+            return bucket_ms
+    return _TIMESERIES_BUCKETS_MS[-1]
+
+
 _USAGE_DB_INSTANCE: UsageDatabase | None = None
+# Concurrent Admin reads must not observe an instance whose migration has not
+# finished, so creation is serialized rather than checked and awaited.
+_USAGE_DB_LOCK = asyncio.Lock()
 
 
 async def get_usage_database() -> UsageDatabase:
     global _USAGE_DB_INSTANCE
     if _USAGE_DB_INSTANCE is None:
-        _USAGE_DB_INSTANCE = UsageDatabase()
-        await _USAGE_DB_INSTANCE.initialize()
+        async with _USAGE_DB_LOCK:
+            if _USAGE_DB_INSTANCE is None:
+                database = UsageDatabase()
+                await database.initialize()
+                _USAGE_DB_INSTANCE = database
     return _USAGE_DB_INSTANCE
 
 
 async def close_usage_database() -> None:
     global _USAGE_DB_INSTANCE
-    if _USAGE_DB_INSTANCE:
-        await _USAGE_DB_INSTANCE.close()
-        _USAGE_DB_INSTANCE = None
+    async with _USAGE_DB_LOCK:
+        if _USAGE_DB_INSTANCE:
+            await _USAGE_DB_INSTANCE.close()
+            _USAGE_DB_INSTANCE = None
