@@ -9,6 +9,14 @@ REPO_ARCHIVE_URL="https://github.com/$REPO_SLUG/archive/refs/heads/main.zip"
 REPO_RELEASES_FEED_URL="https://github.com/$REPO_SLUG/releases.atom"
 PYTHON_VERSION="3.14.0"
 MIN_UV_VERSION="0.12.13"
+# A stale launcher on PATH must never stall the whole installation, so every
+# agent validation runs under a hard timeout instead of an open-ended call.
+AGENT_PROBE_TIMEOUT_SECONDS=15
+case "${LUICODE_AGENT_PROBE_TIMEOUT_SECONDS:-}" in
+    ''|*[!0-9]*) ;;
+    *) [ "$LUICODE_AGENT_PROBE_TIMEOUT_SECONDS" -ge 1 ] &&
+        AGENT_PROBE_TIMEOUT_SECONDS=$LUICODE_AGENT_PROBE_TIMEOUT_SECONDS ;;
+esac
 CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
 CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
 PI_INSTALL_URL="https://pi.dev/install.sh"
@@ -47,6 +55,12 @@ temporary_binary=""
 tool_bin=""
 pi_available=0
 rtk_path=""
+probe_output_file=""
+probe_error_file=""
+probe_marker=""
+# Assigned once the user's PATH is intact; declared here so the `set -u` lookups
+# in find_installed_coding_agent are always safe.
+original_opencode_path=""
 
 # Android/Termux detection
 is_termux() {
@@ -151,18 +165,293 @@ find_installed_coding_agent() (
         return 0
     fi
     command_path=$(command -v "$1" 2>/dev/null) || return 1
-    if [ "$1" = pi ] && [ "$dry_run" -eq 0 ]; then
-        pi_command_is_compatible || return 1
-    fi
     printf '%s\n' "$command_path"
 )
 
-select_coding_agent() {
-    if find_installed_coding_agent "$1" >/dev/null; then
-        printf '%s already installed; will verify.\n' "$2" >&4
+coding_agent_is_usable() {
+    case "$1" in
+        Working|Unknown) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+coding_agent_is_broken() {
+    # Unrecognized is deliberately excluded: a foreign program owning the
+    # command name is simply not the agent, so the install prompt already covers
+    # it and a repair offer would be misleading.
+    case "$1" in
+        Broken|VersionCheckFailed) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# A watchdog subshell enforces the deadline while `wait` supplies the real exit
+# status. Deliberately not built on `timeout(1)`: macOS has no such command, so
+# relying on it gave two code paths and only the unexercised one shipped bugs.
+# Polling `kill -0` is not a valid alternative either, because it succeeds for a
+# child that has exited but not yet been reaped, which would report every
+# working agent as hung. Like `timeout`, this signals the probe process itself.
+run_with_probe_timeout() {
+    probe_path=$1
+    shift
+
+    probe_marker="${TMPDIR:-/tmp}/luicode-agent-probe.$$.marker"
+    rm -f "$probe_marker"
+    "$probe_path" "$@" &
+    probe_pid=$!
+    # The watchdog must never outlive this function, for two reasons. Its own
+    # output is discarded so it cannot hold the caller's stdout pipe open: a
+    # command substitution waits for every writer, so a watchdog that leaked
+    # would stall until the timeout expired. And it traps TERM to reap its own
+    # sleep, because killing the subshell does not reach the sleep it started.
+    (
+        sleep "$AGENT_PROBE_TIMEOUT_SECONDS" &
+        watchdog_sleep=$!
+        # Armed only after the pid is known: a trap that fired first would run
+        # `kill 0` and signal the installer's whole process group.
+        trap 'kill "$watchdog_sleep" 2>/dev/null || true; exit 0' TERM INT
+        wait "$watchdog_sleep" 2>/dev/null || true
+        : >"$probe_marker"
+        kill -TERM "$probe_pid" 2>/dev/null || true
+        sleep 1
+        kill -KILL "$probe_pid" 2>/dev/null || true
+    ) >/dev/null 2>&1 &
+    probe_watchdog=$!
+
+    probe_status=0
+    wait "$probe_pid" || probe_status=$?
+    kill -TERM "$probe_watchdog" 2>/dev/null || true
+    wait "$probe_watchdog" 2>/dev/null || true
+    if [ -e "$probe_marker" ]; then
+        rm -f "$probe_marker"
+        return 124
+    fi
+    return "$probe_status"
+}
+
+probe_command_version() {
+    # Prints "<exit code>|<stdout first line>|<stderr first line>" and never
+    # aborts, so one broken agent cannot stop the whole installation. Named by
+    # pid rather than mktemp because detection runs before that prerequisite.
+    probe_target=$1
+    probe_output_file="${TMPDIR:-/tmp}/luicode-agent-probe.$$.out"
+    probe_error_file="${TMPDIR:-/tmp}/luicode-agent-probe.$$.err"
+    if [ "$dry_run" -eq 1 ]; then
+        printf '0|dry run|'
         return 0
     fi
-    prompt_yes_no "Install $2 for $3?" "${4:-yes}"
+
+    set +e
+    run_with_probe_timeout "$probe_target" --version >"$probe_output_file" 2>"$probe_error_file"
+    probe_status=$?
+    set -e
+    probe_stdout=$(first_output_line "$probe_output_file")
+    probe_stderr=$(first_output_line "$probe_error_file")
+    rm -f "$probe_output_file" "$probe_error_file"
+    printf '%s|%s|%s\n' "$probe_status" "$probe_stdout" "$probe_stderr"
+}
+
+first_output_line() {
+    [ -f "$1" ] || return 0
+    sed -n '/[^[:space:]]/{s/^[[:space:]]*//;s/[[:space:]]*$//;p;q;}' "$1"
+}
+
+coding_agent_is_recognized() {
+    # Detects a different program that happens to own the command name.
+    [ "$1" = pi ] || return 0
+    if [ "$dry_run" -eq 1 ]; then
+        return 0
+    fi
+    pi_help=$(run_with_probe_timeout "$2" --help 2>/dev/null) || return 1
+    case "$pi_help" in
+        *--extension*) ;;
+        *) return 1 ;;
+    esac
+    case "$pi_help" in
+        *--models*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+detect_coding_agent() {
+    # Sets agent_state/agent_path/agent_version/agent_reason without leaking
+    # PATH changes back into the installer.
+    agent_command=$1
+    agent_state=NotInstalled
+    agent_path=""
+    agent_version=""
+    agent_reason=""
+
+    agent_path=$(find_installed_coding_agent "$agent_command") || return 0
+    if [ "$dry_run" -eq 1 ]; then
+        agent_state=Unknown
+        agent_reason="the dry run does not execute coding agents"
+        return 0
+    fi
+
+    probe_result=$(probe_command_version "$agent_path") || {
+        agent_state=Unknown
+        agent_reason="could not start the command"
+        return 0
+    }
+    probe_status=${probe_result%%|*}
+    probe_rest=${probe_result#*|}
+    probe_stdout=${probe_rest%%|*}
+    probe_stderr=${probe_rest#*|}
+
+    if [ "$probe_status" -eq 124 ]; then
+        agent_state=VersionCheckFailed
+        agent_reason="the command did not answer '--version' within $AGENT_PROBE_TIMEOUT_SECONDS seconds"
+        return 0
+    fi
+    if [ "$probe_status" -ne 0 ]; then
+        agent_state=Broken
+        agent_reason="exit code $probe_status"
+        if [ -n "$probe_stderr" ]; then
+            agent_reason="$agent_reason: $probe_stderr"
+        elif [ -n "$probe_stdout" ]; then
+            agent_reason="$agent_reason: $probe_stdout"
+        fi
+        return 0
+    fi
+    if ! coding_agent_is_recognized "$agent_command" "$agent_path"; then
+        agent_state=Unrecognized
+        agent_reason="the command at this path is not the expected coding agent"
+        return 0
+    fi
+    if [ -z "$probe_stdout" ]; then
+        agent_state=VersionCheckFailed
+        agent_reason="the command exited successfully but printed no version"
+        return 0
+    fi
+
+    # Report exactly what the agent printed, so the value is traceable to the
+    # tool rather than to installer-side parsing.
+    agent_state=Working
+    agent_version=$probe_stdout
+}
+
+coding_agent_display_name() {
+    case "$1" in
+        claude) printf 'Claude Code' ;;
+        codex) printf 'Codex' ;;
+        pi) printf 'Pi' ;;
+        opencode) printf 'OpenCode' ;;
+        cline) printf 'Cline CLI' ;;
+        hermes) printf 'Hermes Agent' ;;
+        dsh) printf 'DeepSeek Harness' ;;
+        grok) printf 'Grok Build' ;;
+        muse) printf 'Muse Code' ;;
+        aider) printf 'Aider' ;;
+        rtk) printf 'RTK' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+coding_agent_catalog() {
+    printf 'claude codex pi opencode cline dsh grok aider'
+    if [ "$TERMUX" -eq 0 ]; then
+        printf ' hermes muse'
+    fi
+}
+
+# Probes every supported agent once, prints the report, and caches each state
+# for the prompts that follow. Positional parameters are read-only here, so the
+# per-agent results are stored in dedicated variables instead.
+print_coding_agent_report() {
+    step "Detecting existing coding agents"
+
+    report_working=0
+    report_broken=0
+    report_missing=0
+    report_unknown=0
+    for report_command in $(coding_agent_catalog); do
+        detect_coding_agent "$report_command"
+        case "$report_command" in
+            claude) detected_claude=$agent_state ;;
+            codex) detected_codex=$agent_state ;;
+            pi) detected_pi=$agent_state ;;
+            opencode) detected_opencode=$agent_state ;;
+            cline) detected_cline=$agent_state ;;
+            hermes) detected_hermes=$agent_state ;;
+            dsh) detected_dsh=$agent_state ;;
+            grok) detected_grok=$agent_state ;;
+            muse) detected_muse=$agent_state ;;
+            aider) detected_aider=$agent_state ;;
+        esac
+        if [ "$agent_state" = NotInstalled ]; then
+            report_missing=$((report_missing + 1))
+            continue
+        fi
+
+        printf '\n%s\n' "$(coding_agent_display_name "$report_command")"
+        case "$agent_state" in
+            Working)
+                report_working=$((report_working + 1))
+                printf '  ok found and working\n'
+                printf '  Version: %s\n' "$agent_version"
+                ;;
+            Unknown)
+                report_unknown=$((report_unknown + 1))
+                printf '  ?  found but could not be validated\n'
+                printf '  Path: %s\n' "$agent_path"
+                [ -z "$agent_reason" ] || printf '  Reason: %s\n' "$agent_reason"
+                ;;
+            Unrecognized)
+                # A foreign program is treated as absent so it gets the normal
+                # install prompt rather than a repair offer.
+                report_missing=$((report_missing + 1))
+                printf '  !  found but is not the expected application\n'
+                printf '  Path: %s\n' "$agent_path"
+                [ -z "$agent_reason" ] || printf '  Reason: %s\n' "$agent_reason"
+                ;;
+            *)
+                report_broken=$((report_broken + 1))
+                printf '  !  found but appears broken\n'
+                printf '  Path: %s\n' "$agent_path"
+                [ -z "$agent_reason" ] || printf '  Reason: %s\n' "$agent_reason"
+                ;;
+        esac
+    done
+
+    printf '\n'
+    step "Existing agent summary"
+    printf 'Working: %s\n' "$report_working"
+    printf 'Broken: %s\n' "$report_broken"
+    printf 'Not installed: %s\n' "$report_missing"
+    if [ "$report_unknown" -gt 0 ]; then
+        printf 'Undetermined: %s\n' "$report_unknown"
+    fi
+    printf '\n'
+    printf 'A broken optional coding agent does not prevent luicode from installing.\n'
+}
+
+read_coding_agent_selection() {
+    # Reuses the cached state so a reselected agent is not probed again.
+    selection_state=$1
+    selection_display=$2
+    selection_luicode_command=$3
+    selection_default=${4:-yes}
+
+    if coding_agent_is_usable "$selection_state"; then
+        if [ "$selection_state" = Working ]; then
+            printf '%s already installed and working.\n' "$selection_display"
+        else
+            printf '%s found on PATH; it will be verified during installation.\n' "$selection_display"
+        fi
+        return 0
+    fi
+    if coding_agent_is_broken "$selection_state"; then
+        # Never overwrite a broken installation on the user's behalf. Reporting
+        # and continuing keeps a stale launcher from blocking luicode.
+        printf '[WARNING] %s was detected but failed validation.\n' "$selection_display"
+        printf 'luicode does not depend on %s.\n' "$selection_display"
+        if ! prompt_yes_no "Would you like luicode to attempt to repair $selection_display?" no; then
+            printf 'Continuing without %s.\n' "$selection_display"
+            return 1
+        fi
+    fi
+    prompt_yes_no "Install $selection_display for $selection_luicode_command?" "$selection_default"
 }
 
 choose_coding_agents() {
@@ -183,34 +472,56 @@ choose_coding_agents() {
         install_muse=0
     fi
 
+    # Probe once up front so the report and the prompts agree on every agent.
+    # POSIX sh has no portable string-keyed array, so each result is kept in a
+    # dedicated variable and read back through a case lookup.
+    cached_state_of() {
+        case "$1" in
+            claude) printf '%s' "$detected_claude" ;;
+            codex) printf '%s' "$detected_codex" ;;
+            pi) printf '%s' "$detected_pi" ;;
+            opencode) printf '%s' "$detected_opencode" ;;
+            cline) printf '%s' "$detected_cline" ;;
+            hermes) printf '%s' "$detected_hermes" ;;
+            dsh) printf '%s' "$detected_dsh" ;;
+            grok) printf '%s' "$detected_grok" ;;
+            muse) printf '%s' "$detected_muse" ;;
+            aider) printf '%s' "$detected_aider" ;;
+            *) printf 'NotInstalled' ;;
+        esac
+    }
+    print_coding_agent_report
+
     while :; do
-        if select_coding_agent claude "Claude Code" luicode-claude; then
+        step "Optional luicode coding agents"
+        if read_coding_agent_selection "$(cached_state_of claude)" "Claude Code" luicode-claude; then
             install_claude=1
         else
             install_claude=0
         fi
-        if select_coding_agent codex Codex luicode-codex; then
+        if read_coding_agent_selection "$(cached_state_of codex)" "Codex" luicode-codex; then
             install_codex=1
         else
             install_codex=0
         fi
-        if select_coding_agent pi Pi luicode-pi; then
+        if read_coding_agent_selection "$(cached_state_of pi)" "Pi" luicode-pi; then
             install_pi=1
         else
             install_pi=0
         fi
-        if select_coding_agent opencode OpenCode luicode-opencode; then
+        if read_coding_agent_selection "$(cached_state_of opencode)" "OpenCode" luicode-opencode; then
             install_opencode=1
         else
             install_opencode=0
         fi
 
+        # Cline keeps its historical npm-aware default for a genuinely absent agent.
         if [ "$install_cline" -eq 1 ]; then
             cline_default=yes
         else
             cline_default=no
         fi
-        if select_coding_agent cline "Cline CLI" luicode-cline "$cline_default"; then
+        if read_coding_agent_selection "$(cached_state_of cline)" "Cline CLI" luicode-cline "$cline_default"; then
             install_cline=1
         else
             install_cline=0
@@ -222,7 +533,7 @@ choose_coding_agents() {
             else
                 hermes_default=no
             fi
-            if select_coding_agent hermes "Hermes Agent" luicode-hermes "$hermes_default"; then
+            if read_coding_agent_selection "$(cached_state_of hermes)" "Hermes Agent" luicode-hermes "$hermes_default"; then
                 install_hermes=1
             else
                 install_hermes=0
@@ -234,7 +545,7 @@ choose_coding_agents() {
         else
             dsh_default=no
         fi
-        if select_coding_agent dsh "DeepSeek Harness" luicode-dsh "$dsh_default"; then
+        if read_coding_agent_selection "$(cached_state_of dsh)" "DeepSeek Harness" luicode-dsh "$dsh_default"; then
             install_dsh=1
         else
             install_dsh=0
@@ -245,7 +556,7 @@ choose_coding_agents() {
         else
             grok_default=no
         fi
-        if select_coding_agent grok "Grok Build" luicode-grok "$grok_default"; then
+        if read_coding_agent_selection "$(cached_state_of grok)" "Grok Build" luicode-grok "$grok_default"; then
             install_grok=1
         else
             install_grok=0
@@ -257,7 +568,7 @@ choose_coding_agents() {
             else
                 muse_default=no
             fi
-            if select_coding_agent muse "Muse Code" luicode-muse "$muse_default"; then
+            if read_coding_agent_selection "$(cached_state_of muse)" "Muse Code" luicode-muse "$muse_default"; then
                 install_muse=1
             else
                 install_muse=0
@@ -269,7 +580,7 @@ choose_coding_agents() {
         else
             aider_default=no
         fi
-        if select_coding_agent aider Aider luicode-aider "$aider_default"; then
+        if read_coding_agent_selection "$(cached_state_of aider)" "Aider" luicode-aider "$aider_default"; then
             install_aider=1
         else
             install_aider=0
@@ -282,9 +593,19 @@ choose_coding_agents() {
     done
 
     if [ "$enable_rtk" -eq 0 ]; then
-        if command -v rtk >/dev/null 2>&1; then
+        detect_coding_agent rtk
+        if coding_agent_is_usable "$agent_state"; then
             printf 'RTK already installed; will verify.\n' >&4
             enable_rtk=1
+        elif coding_agent_is_broken "$agent_state"; then
+            printf '[WARNING] RTK was detected but failed validation.\n' >&4
+            printf '  Path: %s\n' "$agent_path" >&4
+            [ -z "$agent_reason" ] || printf '  Reason: %s\n' "$agent_reason" >&4
+            printf 'luicode does not depend on RTK.\n' >&4
+            if prompt_yes_no "Would you like luicode to attempt to repair RTK?" no; then
+                printf 'Replacing RTK was accepted; the pinned release will be installed.\n' >&4
+                enable_rtk=1
+            fi
         elif prompt_yes_no "Enable RTK token optimization globally for the selected coding agents?" no; then
             enable_rtk=1
         fi
@@ -341,6 +662,11 @@ cleanup() {
     if [ -n "$temporary_binary" ] && [ -e "$temporary_binary" ]; then
         rm -f "$temporary_binary"
     fi
+    for probe_leftover in "$probe_output_file" "$probe_error_file" "$probe_marker"; do
+        if [ -n "$probe_leftover" ] && [ -e "$probe_leftover" ]; then
+            rm -f "$probe_leftover"
+        fi
+    done
 }
 
 trap cleanup EXIT
@@ -2108,6 +2434,8 @@ add_known_bin_directories
 if [ "$latest_release" -eq 1 ]; then
     stop_if_already_on_latest_release
 fi
+# npm availability alone must not force Cline on: the detection report now
+# distinguishes a genuinely absent agent from a broken launcher already on PATH.
 if command -v cline >/dev/null 2>&1 || command -v npm >/dev/null 2>&1; then
     install_cline=1
 fi

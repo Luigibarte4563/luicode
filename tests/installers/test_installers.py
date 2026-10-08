@@ -61,6 +61,21 @@ def _write_executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
+def _sh_single_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _ps_detection_scenario(body: str, *, dry_run: bool = False) -> str:
+    return f"""$script:OriginalOpenCode = $null
+$DryRun = ${"true" if dry_run else "false"}
+Add-KnownBinDirectories
+{body}
+Write-Output "state:$($state.State)"
+Write-Output "version:$($state.Version)"
+Write-Output "reason:$($state.Reason)"
+"""
+
+
 def _braced_body(text: str, declaration: str) -> str:
     start = text.index(declaration)
     brace_start = text.index("{", start)
@@ -75,7 +90,9 @@ def _braced_body(text: str, declaration: str) -> str:
     raise AssertionError(f"Unclosed function body for {declaration}")
 
 
-def _posix_command(name: str, *, version_output: str | None = None) -> str:
+def _posix_command(
+    name: str, *, version_output: str | None = None, fail_version: bool = False
+) -> str:
     version = {
         "opencode": "v2.0.10",
         "cline": "3.0.55",
@@ -97,6 +114,13 @@ def _posix_command(name: str, *, version_output: str | None = None) -> str:
     version_command = f'''if [ "${{1:-}}" = "--version" ]; then
     echo "{version_output}"
 fi'''
+    if fail_version:
+        version_command = (
+            'if [ "${1:-}" = "--version" ]; then\n'
+            '    echo "Error: launcher exists but the package was removed" >&2\n'
+            "    exit 1\n"
+            "fi"
+        )
     help_output = (
         '    echo "  --extension, -e <path>  Load an extension"\n'
         '    echo "  --models <patterns>     Scope models"'
@@ -250,6 +274,29 @@ class PosixHarness:
 
     def add_unrelated_pi(self) -> None:
         _write_executable(self.bin_dir / "pi", _posix_command("unrelated-pi"))
+
+    def add_broken_client(self, name: str, *, stderr: str = "") -> None:
+        """A launcher that exists on PATH but whose backing module is gone."""
+        failure = f'    echo "{stderr}" >&2\n' if stderr else ""
+        _write_executable(
+            self.bin_dir / name,
+            f"""#!/bin/sh
+echo "{name}:$*" >> "$CALL_LOG"
+if [ "${{1:-}}" = "--version" ]; then
+{failure}    exit 1
+fi
+exit 0
+""",
+        )
+
+    def add_hanging_client(self, name: str) -> None:
+        _write_executable(
+            self.bin_dir / name,
+            f"""#!/bin/sh
+echo "{name}:$*" >> "$CALL_LOG"
+sleep 30
+""",
+        )
 
     def add_npm_prefix(self, prefix: Path) -> None:
         prefix.mkdir(parents=True)
@@ -649,6 +696,251 @@ printf '%s  %s\n' "$checksum" "$1"
     return PosixHarness(tmp_path, bin_dir, fixtures, tool_bin, log, env)
 
 
+class TestAgentDetectionStateMachine:
+    """Detection must execute the agent, not merely resolve a launcher path."""
+
+    @staticmethod
+    def _run_detection(
+        posix_harness: PosixHarness,
+        scenario: str,
+        *,
+        probe_timeout: int = 5,
+    ) -> subprocess.CompletedProcess[str]:
+        source = (_repo_root() / "scripts/install.sh").read_text(encoding="utf-8")
+        installer = posix_harness.root / "detection.sh"
+        installer.write_text(
+            source.split('\nparse_args "$@"\n', 1)[0]
+            + scenario
+            + "\nprintf 'detection complete\\n'\n",
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            ["/bin/sh", str(installer)],
+            env=posix_harness.env
+            | {"LUICODE_AGENT_PROBE_TIMEOUT_SECONDS": str(probe_timeout)},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+
+    def test_missing_command_is_not_installed(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        (posix_harness.bin_dir / "aider").unlink(missing_ok=True)
+
+        result = self._run_detection(
+            posix_harness,
+            'detect_coding_agent aider\nprintf "state:%s\\n" "$agent_state"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:NotInstalled" in result.stdout
+        assert "aider:--version" not in posix_harness.calls()
+
+    def test_working_command_reports_its_version(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        posix_harness.add_client("aider")
+
+        result = self._run_detection(
+            posix_harness,
+            "detect_coding_agent aider\n"
+            'printf "state:%s\\n" "$agent_state"\n'
+            'printf "version:%s\\n" "$agent_version"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Working" in result.stdout
+        assert "version:aider 1.0.0" in result.stdout
+        assert "aider:--version" in posix_harness.calls()
+
+    def test_failing_version_command_is_broken(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        posix_harness.add_broken_client("aider")
+
+        result = self._run_detection(
+            posix_harness,
+            "detect_coding_agent aider\n"
+            'printf "state:%s\\n" "$agent_state"\n'
+            'printf "reason:%s\\n" "$agent_reason"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Broken" in result.stdout
+        assert "reason:exit code 1" in result.stdout
+
+    def test_missing_node_module_launcher_is_broken(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        # The reported real-world failure: the .cmd/npm shim outlives its package.
+        posix_harness.add_broken_client(
+            "cline",
+            stderr=r"Error: Cannot find module 'cline/bin/cline'",
+        )
+
+        result = self._run_detection(
+            posix_harness,
+            "detect_coding_agent cline\n"
+            'printf "state:%s\\n" "$agent_state"\n'
+            'printf "reason:%s\\n" "$agent_reason"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Broken" in result.stdout
+        assert "Cannot find module" in result.stdout
+
+    def test_hanging_command_times_out(self, posix_harness: PosixHarness) -> None:
+        posix_harness.add_hanging_client("aider")
+
+        result = self._run_detection(
+            posix_harness,
+            'detect_coding_agent aider\nprintf "state:%s\\n" "$agent_state"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:VersionCheckFailed" in result.stdout
+
+    def test_wrong_program_is_unrecognized(self, posix_harness: PosixHarness) -> None:
+        # A different `pi` answers --version but is not a Pi Coding Agent.
+        posix_harness.add_unrelated_pi()
+
+        result = self._run_detection(
+            posix_harness,
+            'detect_coding_agent pi\nprintf "state:%s\\n" "$agent_state"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Unrecognized" in result.stdout
+
+    def test_dry_run_never_executes_the_agent(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        posix_harness.add_client("aider")
+
+        result = self._run_detection(
+            posix_harness,
+            'dry_run=1\ndetect_coding_agent aider\nprintf "state:%s\\n" "$agent_state"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Unknown" in result.stdout
+        assert posix_harness.calls() == []
+
+    def test_dangling_symlink_is_never_reported_as_working(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        # A stale symlink whose target was removed. Whether the shell resolves it
+        # is implementation-defined, so only the guarantee matters: it must never
+        # be mistaken for a working installation.
+        launcher = posix_harness.bin_dir / "aider"
+        launcher.unlink(missing_ok=True)
+        try:
+            launcher.symlink_to(
+                posix_harness.root / "removed-package" / "bin" / "aider"
+            )
+        except OSError:
+            pytest.skip("the test environment cannot create symlinks")
+
+        result = self._run_detection(
+            posix_harness,
+            'detect_coding_agent aider\nprintf "state:%s\\n" "$agent_state"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Working" not in result.stdout
+
+    def test_symlinked_failing_launcher_is_broken(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        # A resolvable symlink whose target is a stale launcher: this is the
+        # shape a package manager leaves behind after removing an agent.
+        launcher = posix_harness.bin_dir / "aider"
+        launcher.unlink(missing_ok=True)
+        _write_executable(
+            posix_harness.root / "stale-aider",
+            _posix_command("aider", fail_version=True),
+        )
+        try:
+            launcher.symlink_to(posix_harness.root / "stale-aider")
+        except OSError:
+            pytest.skip("the test environment cannot create symlinks")
+
+        result = self._run_detection(
+            posix_harness,
+            'detect_coding_agent aider\nprintf "state:%s\\n" "$agent_state"\n',
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Broken" in result.stdout
+
+    def test_probe_does_not_wait_for_its_timeout_when_the_command_is_fast(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        # A leaked watchdog holds the caller's stdout pipe open, so the command
+        # substitution that captures Pi's identity probe blocks for the whole
+        # timeout even though Pi answers instantly. Measured with the shell's own
+        # clock; the leak cost the full 30 seconds, so this bound is not close.
+        posix_harness.add_client("pi")
+        result = self._run_detection(
+            posix_harness,
+            "probe_started=$(date +%s)\n"
+            "detect_coding_agent pi\n"
+            "printf 'state:%s\\n' \"$agent_state\"\n"
+            "printf 'elapsed:%s\\n' \"$(( $(date +%s) - probe_started ))\"\n",
+            probe_timeout=30,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Working" in result.stdout
+        elapsed = re.search(r"elapsed:(\d+)", result.stdout)
+        assert elapsed is not None, result.stdout
+        assert int(elapsed.group(1)) < 10, result.stdout
+
+    def test_agents_can_hold_different_states_at_once(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        posix_harness.add_client("claude")
+        posix_harness.add_broken_client("codex")
+        (posix_harness.bin_dir / "aider").unlink(missing_ok=True)
+
+        result = self._run_detection(
+            posix_harness,
+            """
+detect_coding_agent claude
+printf 'claude:%s\\n' "$agent_state"
+detect_coding_agent codex
+printf 'codex:%s\\n' "$agent_state"
+detect_coding_agent aider
+printf 'aider:%s\\n' "$agent_state"
+""",
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "claude:Working" in result.stdout
+        assert "codex:Broken" in result.stdout
+        assert "aider:NotInstalled" in result.stdout
+
+    def test_detection_does_not_leak_path_changes(
+        self, posix_harness: PosixHarness
+    ) -> None:
+        path_before = posix_harness.env["PATH"]
+        result = self._run_detection(
+            posix_harness,
+            f"""
+path_before={_sh_single_quote(path_before)}
+for probe in claude pi cline dsh aider opencode; do
+    detect_coding_agent "$probe"
+done
+[ "$PATH" = "$path_before" ] || fail "Detection changed PATH"
+[ -z "$original_opencode_path" ] || fail "Detection changed original OpenCode"
+""",
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("rtk", (False, True, None))
 def test_install_sh_auto_selects_installed_harnesses(
     posix_harness: PosixHarness, rtk: bool | None
@@ -764,11 +1056,110 @@ def test_install_sh_asks_about_unrelated_pi(posix_harness: PosixHarness) -> None
     result = posix_harness.run_interactive("n\n" * 10)
 
     assert result.returncode == 0, result.stdout
+    assert "found but is not the expected application" in result.stdout
     assert "Install Pi for luicode-pi?" in result.stdout
     calls = posix_harness.calls()
+    assert "unrelated-pi:--version" in calls
     assert "unrelated-pi:--help" in calls
-    assert "unrelated-pi:--version" not in calls
     assert "pi-install" not in calls
+
+
+def test_install_sh_reports_working_existing_agents_with_versions(
+    posix_harness: PosixHarness,
+) -> None:
+    for command in CODING_AGENTS:
+        posix_harness.add_client(command)
+
+    result = posix_harness.run_interactive("")
+
+    assert result.returncode == 0, result.stdout
+    assert "==> Detecting existing coding agents" in result.stdout
+    assert (
+        "Claude Code\n  ok found and working\n  Version: claude 1.0.0" in result.stdout
+    )
+    assert "Cline CLI\n  ok found and working\n  Version: cline 3.0.55" in result.stdout
+    assert "Working: 10" in result.stdout
+    assert "Broken: 0" in result.stdout
+    assert "Not installed: 0" in result.stdout
+    assert (
+        "A broken optional coding agent does not prevent luicode from installing."
+        in (result.stdout)
+    )
+    calls = posix_harness.calls()
+    assert not any(call.startswith("npm:install") for call in calls)
+
+
+def test_install_sh_continues_when_broken_launcher_is_declined(
+    posix_harness: PosixHarness,
+) -> None:
+    # The reported failure: cline.cmd survives on PATH with no package behind it.
+    posix_harness.add_broken_client(
+        "cline", stderr="Error: Cannot find module 'cline/bin/cline'"
+    )
+    launcher = (posix_harness.bin_dir / "cline").read_bytes()
+
+    result = posix_harness.run_interactive("n\n" * 10)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "luicode is installed and verified." in result.stdout
+    assert "Cline CLI\n  !  found but appears broken" in result.stdout
+    assert "Cannot find module" in result.stdout
+    assert (
+        "Would you like luicode to attempt to repair Cline CLI? [y/N]" in result.stdout
+    )
+    assert "Broken: 1" in result.stdout
+    # The harness preinstalls OpenCode; every other agent is absent.
+    assert "Working: 1" in result.stdout
+    assert "Not installed: 8" in result.stdout
+    assert (posix_harness.bin_dir / "cline").read_bytes() == launcher
+    calls = posix_harness.calls()
+    assert "cline:--version" in calls
+    assert not any(call.startswith("npm:install -g cline") for call in calls)
+
+
+def test_install_sh_broken_launcher_does_not_abort_the_installation(
+    posix_harness: PosixHarness,
+) -> None:
+    posix_harness.add_broken_client("codex")
+
+    result = posix_harness.run_interactive("n\n" * 10)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "luicode is installed and verified." in result.stdout
+    assert "Codex\n  !  found but appears broken" in result.stdout
+    calls = posix_harness.calls()
+    assert "codex:--version" in calls
+    assert not any("chatgpt.com" in call for call in calls)
+
+
+def test_install_sh_report_lists_each_agent_in_its_own_state(
+    posix_harness: PosixHarness,
+) -> None:
+    posix_harness.add_client("claude")
+    posix_harness.add_broken_client("codex")
+    (posix_harness.bin_dir / "aider").unlink(missing_ok=True)
+
+    result = posix_harness.run_interactive("n\n" * 10)
+
+    assert result.returncode == 0, result.stdout
+    assert "Claude Code\n  ok found and working" in result.stdout
+    assert "Codex\n  !  found but appears broken" in result.stdout
+    # The harness already provides OpenCode; Aider was removed for this case.
+    assert "Working: 2" in result.stdout
+    assert "Broken: 1" in result.stdout
+    assert "Not installed: 7" in result.stdout
+
+
+def test_install_sh_dry_run_does_not_probe_broken_launchers(
+    posix_harness: PosixHarness,
+) -> None:
+    posix_harness.add_broken_client("cline")
+
+    result = posix_harness.run_interactive("n\n" * 10, "--dry-run")
+
+    assert result.returncode == 0, result.stdout
+    assert "could not be validated" in result.stdout
+    assert "cline:--version" not in posix_harness.calls()
 
 
 def test_install_sh_interactive_dry_run_does_not_execute_probes(
@@ -1038,10 +1429,8 @@ def test_install_sh_discovers_aider_in_custom_uv_tool_bin(
     assert "aider:--version" in calls
 
 
-@pytest.mark.parametrize("fail_step", ("", "aider-verify"), ids=("valid", "broken"))
 def test_install_sh_checks_existing_aider_in_custom_uv_tool_bin_before_installing(
     posix_harness: PosixHarness,
-    fail_step: str,
 ) -> None:
     custom_tool_bin = posix_harness.root / "custom-tool-bin"
     existing_aider = custom_tool_bin / "aider"
@@ -1052,30 +1441,57 @@ def test_install_sh_checks_existing_aider_in_custom_uv_tool_bin_before_installin
     )
     original = existing_aider.read_bytes()
 
-    result = posix_harness.run_interactive("n\n" * 9, fail_step=fail_step)
+    result = posix_harness.run_interactive("n\n" * 9)
 
-    if fail_step:
-        assert result.returncode != 0
-    else:
-        assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     calls = posix_harness.calls()
     assert "for luicode-aider?" not in result.stdout
+    assert "Aider already installed and working." in result.stdout
     assert "aider:--version" in calls
     assert not any("aider-chat@latest" in call for call in calls)
     assert existing_aider.read_bytes() == original
 
 
-def test_install_sh_rejects_broken_existing_aider_without_replacing_it(
+def test_install_sh_continues_when_broken_custom_tool_bin_aider_is_declined(
     posix_harness: PosixHarness,
 ) -> None:
-    posix_harness.add_client("aider")
+    custom_tool_bin = posix_harness.root / "custom-tool-bin"
+    existing_aider = custom_tool_bin / "aider"
+    posix_harness.env["UV_TOOL_BIN_DIR"] = str(custom_tool_bin)
+    _write_executable(
+        existing_aider,
+        _posix_command("aider", fail_version=True),
+    )
+    original = existing_aider.read_bytes()
 
-    result = posix_harness.run(fail_step="aider-verify")
+    result = posix_harness.run_interactive("n\n" * 10)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "luicode is installed and verified." in result.stdout
+    assert "for luicode-aider?" not in result.stdout
+    assert "Aider\n  !  found but appears broken" in result.stdout
+    calls = posix_harness.calls()
+    assert "aider:--version" in calls
+    assert not any("aider-chat@latest" in call for call in calls)
+    assert existing_aider.read_bytes() == original
+
+
+def test_install_sh_rejects_broken_selected_aider_without_replacing_it(
+    posix_harness: PosixHarness,
+) -> None:
+    # Selected for installation, so a failing verify is a real install failure.
+    (posix_harness.bin_dir / "aider").unlink(missing_ok=True)
+    posix_harness.add_uv("0.12.13")
+
+    # A working agent is never prompted for, and the harness already provides
+    # OpenCode, so Aider is the ninth prompt rather than the tenth.
+    result = posix_harness.run_interactive(
+        "n\n" * 8 + "y\n" + "n\n", fail_step="aider-verify"
+    )
 
     assert result.returncode != 0
     calls = posix_harness.calls()
     assert "aider:--version" in calls
-    assert not any("aider-chat@latest" in call for call in calls)
     assert not any("aider.chat" in call for call in calls)
 
 
@@ -2164,6 +2580,30 @@ class PowerShellHarness:
     def add_unrelated_pi(self) -> None:
         _write_executable(self.bin_dir / "pi.cmd", _batch_client("unrelated-pi"))
 
+    def add_broken_client(self, name: str, *, stderr: str = "") -> None:
+        """A .cmd launcher whose Node.js package was removed underneath it."""
+        failure = f"echo {stderr}\n" if stderr else ""
+        _write_executable(
+            self.bin_dir / f"{name}.cmd",
+            f"""@echo off
+echo {name}:%*>>"%CALL_LOG%"
+if "%1"=="--version" (
+{failure}    exit /b 1
+)
+exit /b 0
+""",
+        )
+
+    def add_hanging_client(self, name: str) -> None:
+        _write_executable(
+            self.bin_dir / f"{name}.cmd",
+            f"""@echo off
+echo {name}:%*>>"%CALL_LOG%"
+ping -n 30 127.0.0.1 >nul
+exit /b 0
+""",
+        )
+
     def add_npm_prefix(self, prefix: Path) -> None:
         prefix.mkdir(parents=True)
         self.env["FAKE_NPM_PREFIX"] = str(prefix)
@@ -2659,6 +3099,162 @@ if ($LASTEXITCODE -ne 0) { throw 'Child command lookup failed' }
         assert "unrelated-module-import" not in powershell_harness.calls()
 
 
+class TestPowerShellAgentDetection:
+    """The Windows path must validate .cmd launchers, not trust their presence."""
+
+    def test_missing_command_is_not_installed(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        (powershell_harness.bin_dir / "aider.cmd").unlink(missing_ok=True)
+
+        result = powershell_harness.run_functions(
+            _ps_detection_scenario(
+                '$state = Get-CodingAgentState -CommandName "aider" -DisplayName "Aider"'
+            )
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:NotInstalled" in result.stdout
+
+    def test_working_cmd_launcher_reports_its_version(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        powershell_harness.add_client("aider")
+
+        result = powershell_harness.run_functions(
+            _ps_detection_scenario(
+                '$state = Get-CodingAgentState -CommandName "aider" -DisplayName "Aider"'
+            )
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Working" in result.stdout
+        assert "version:aider 1.0.0" in result.stdout
+        assert "aider:--version" in powershell_harness.calls()
+
+    def test_failing_cmd_launcher_is_broken(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        powershell_harness.add_broken_client("aider")
+
+        result = powershell_harness.run_functions(
+            _ps_detection_scenario(
+                '$state = Get-CodingAgentState -CommandName "aider" -DisplayName "Aider"'
+            )
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Broken" in result.stdout
+        assert "exit code 1" in result.stdout
+
+    def test_missing_node_module_cmd_launcher_is_broken(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        powershell_harness.add_broken_client(
+            "cline",
+            stderr=r"Error: Cannot find module 'C:\\npm\\node_modules\\cline\\bin\\cline'",
+        )
+
+        result = powershell_harness.run_functions(
+            _ps_detection_scenario(
+                '$state = Get-CodingAgentState -CommandName "cline" -DisplayName "Cline CLI"'
+            )
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Broken" in result.stdout
+        assert "Cannot find module" in result.stdout
+
+    def test_hanging_cmd_launcher_times_out(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        powershell_harness.add_hanging_client("aider")
+        powershell_harness.env["LUICODE_AGENT_PROBE_TIMEOUT_SECONDS"] = "1"
+
+        result = powershell_harness.run_functions(
+            _ps_detection_scenario(
+                '$state = Get-CodingAgentState -CommandName "aider" -DisplayName "Aider"'
+            )
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:VersionCheckFailed" in result.stdout
+
+    def test_wrong_cmd_program_is_unrecognized(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        powershell_harness.add_unrelated_pi()
+
+        result = powershell_harness.run_functions(
+            _ps_detection_scenario(
+                '$state = Get-CodingAgentState -CommandName "pi" -DisplayName "Pi"'
+            )
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Unrecognized" in result.stdout
+
+    def test_dry_run_never_executes_the_launcher(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        powershell_harness.add_client("aider")
+
+        result = powershell_harness.run_functions(
+            _ps_detection_scenario(
+                '$state = Get-CodingAgentState -CommandName "aider" -DisplayName "Aider"',
+                dry_run=True,
+            )
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "state:Unknown" in result.stdout
+        assert powershell_harness.calls() == []
+
+    def test_agents_can_hold_different_states_at_once(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        powershell_harness.add_client("claude")
+        powershell_harness.add_broken_client("codex")
+        (powershell_harness.bin_dir / "aider.cmd").unlink(missing_ok=True)
+
+        result = powershell_harness.run_functions(
+            """
+$claude = Get-CodingAgentState -CommandName "claude" -DisplayName "Claude Code"
+$codex = Get-CodingAgentState -CommandName "codex" -DisplayName "Codex"
+$aider = Get-CodingAgentState -CommandName "aider" -DisplayName "Aider"
+Write-Output "claude:$($claude.State)"
+Write-Output "codex:$($codex.State)"
+Write-Output "aider:$($aider.State)"
+"""
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "claude:Working" in result.stdout
+        assert "codex:Broken" in result.stdout
+        assert "aider:NotInstalled" in result.stdout
+
+    def test_detection_does_not_leak_path_changes(
+        self, powershell_harness: PowerShellHarness
+    ) -> None:
+        powershell_harness.add_npm_prefix(powershell_harness.root / "prefix")
+
+        result = powershell_harness.run_functions(
+            """
+$script:OriginalOpenCode = $null
+Add-KnownBinDirectories
+$pathBefore = $env:Path
+foreach ($name in @("claude", "pi", "cline", "dsh", "aider")) {
+    $null = Get-CodingAgentState -CommandName $name -DisplayName $name
+}
+if ($env:Path -cne $pathBefore) { throw "Detection changed PATH" }
+Write-Output "detection isolated"
+"""
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "detection isolated" in result.stdout
+
+
 @pytest.mark.parametrize("rtk", (False, True, None))
 def test_install_ps1_auto_selects_installed_harnesses(
     powershell_harness: PowerShellHarness,
@@ -2686,6 +3282,82 @@ def test_install_ps1_auto_selects_installed_harnesses(
     assert ("rtk:init --global --codex:telemetry=1" in powershell_harness.calls()) is (
         rtk is not None
     )
+
+
+def test_install_ps1_reports_working_existing_agents_with_versions(
+    powershell_harness: PowerShellHarness,
+) -> None:
+    for command in CODING_AGENTS:
+        powershell_harness.add_client(command)
+
+    result = powershell_harness.run_interactive([""])
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "==> Detecting existing coding agents" in result.stdout
+    assert (
+        "Claude Code\n  ok found and working\n  Version: claude 1.0.0" in result.stdout
+    )
+    assert "Cline CLI\n  ok found and working\n  Version: cline 3.0.55" in result.stdout
+    assert "Working: 10" in result.stdout
+    assert "Broken: 0" in result.stdout
+    assert "Not installed: 0" in result.stdout
+    assert not any(
+        call.startswith("npm:install") for call in powershell_harness.calls()
+    )
+
+
+def test_install_ps1_continues_when_broken_cmd_launcher_is_declined(
+    powershell_harness: PowerShellHarness,
+) -> None:
+    powershell_harness.add_broken_client(
+        "cline", stderr=r"Error: Cannot find module 'C:\\npm\\node_modules\\cline'"
+    )
+    launcher = (powershell_harness.bin_dir / "cline.cmd").read_bytes()
+
+    result = powershell_harness.run_interactive(["n"] * 10)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "luicode is installed and verified." in result.stdout
+    assert "Cline CLI\n  !  found but appears broken" in result.stdout
+    assert "Cannot find module" in result.stdout
+    assert (
+        "Would you like luicode to attempt to repair Cline CLI? [y/N]" in result.stdout
+    )
+    assert "Broken: 1" in result.stdout
+    assert (powershell_harness.bin_dir / "cline.cmd").read_bytes() == launcher
+    calls = powershell_harness.calls()
+    assert "cline:--version" in calls
+    assert not any(call.startswith("npm:install") for call in calls)
+
+
+def test_install_ps1_broken_cmd_launcher_does_not_abort_the_installation(
+    powershell_harness: PowerShellHarness,
+) -> None:
+    powershell_harness.add_broken_client("codex")
+
+    result = powershell_harness.run_interactive(["n"] * 10)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "luicode is installed and verified." in result.stdout
+    assert "Codex\n  !  found but appears broken" in result.stdout
+    calls = powershell_harness.calls()
+    assert "codex:--version" in calls
+    assert not any("chatgpt.com" in call for call in calls)
+
+
+def test_install_ps1_report_lists_each_agent_in_its_own_state(
+    powershell_harness: PowerShellHarness,
+) -> None:
+    powershell_harness.add_client("claude")
+    powershell_harness.add_broken_client("codex")
+    (powershell_harness.bin_dir / "aider.cmd").unlink(missing_ok=True)
+
+    result = powershell_harness.run_interactive(["n"] * 10)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Claude Code\n  ok found and working" in result.stdout
+    assert "Codex\n  !  found but appears broken" in result.stdout
+    assert "Broken: 1" in result.stdout
 
 
 @pytest.mark.parametrize("install_codex", (False, True))
@@ -3014,10 +3686,10 @@ def test_install_ps1_lookup_restores_path_after_exception(
 $script:OriginalOpenCode = $null
 $env:UV_TOOL_BIN_DIR = Join-Path $env:USERPROFILE "exception lookup"
 $pathBefore = $env:Path
-function Get-ApplicationCommand {
+function Get-ApplicationCommands {
     param([string] $Name)
     if ($env:Path.Contains($env:UV_TOOL_BIN_DIR)) { throw "query failed after PATH change" }
-    return $null
+    return @()
 }
 $caught = $false
 try {
@@ -3084,11 +3756,12 @@ def test_install_ps1_asks_about_unrelated_pi(
 
     result = powershell_harness.run_interactive(["n"] * 10)
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "found but is not the expected application" in result.stdout
     assert "Install Pi for luicode-pi?" in result.stdout
     calls = powershell_harness.calls()
+    assert "unrelated-pi:--version" in calls
     assert "unrelated-pi:--help" in calls
-    assert "unrelated-pi:--version" not in calls
     assert "pi-install" not in calls
 
 
@@ -3781,7 +4454,6 @@ def test_install_ps1_replaces_unrelated_pi_command(
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "is not Pi Coding Agent; installing Pi" in result.stdout
     assert "pi-install" in powershell_harness.calls()
     assert "pi:--version" in powershell_harness.calls()
 
@@ -4332,14 +5004,47 @@ def test_install_ps1_selects_at_least_one_coding_agent(
     read_yes_no = _braced_body(text, "function Read-YesNo")
     read_selection = _braced_body(text, "function Read-CodingAgentSelection")
     select_agents = _braced_body(text, "function Select-CodingAgents")
+    detection_report = _braced_body(text, "function Write-CodingAgentDetectionReport")
+    state_is_usable = _braced_body(text, "function Test-CodingAgentIsUsable")
+    state_is_broken = _braced_body(text, "function Test-CodingAgentIsBroken")
     answer_array = ", ".join(repr(answer) for answer in answers)
+    catalog = "\n    ".join(
+        "[pscustomobject] @{{ CommandName = '{command}'; DisplayName = '{display}'; "
+        "LuicodeCommand = 'luicode-{command}'; DefaultYes = ${default} }}".format(
+            command=command,
+            display=display,
+            default="false" if command == "cline" else "true",
+        )
+        for command, display in (
+            ("claude", "Claude Code"),
+            ("codex", "Codex"),
+            ("pi", "Pi"),
+            ("opencode", "OpenCode"),
+            ("cline", "Cline CLI"),
+            ("hermes", "Hermes Agent"),
+            ("dsh", "DeepSeek Harness"),
+            ("grok", "Grok Build"),
+            ("muse", "Muse Code"),
+            ("aider", "Aider"),
+        )
+    )
     script = f"""Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $script:Answers = @({answer_array})
 $script:OriginalOpenCode = $null
 $DryRun = $false
-function Get-ApplicationCommand {{ param([string] $Name) return $null }}
-function Find-InstalledCodingAgent {{ param([string] $CommandName) return $null }}
+$CodingAgentCatalog = @(
+    {catalog}
+)
+function Write-Step {{ param([string] $Message) Write-Host "==> $Message" }}
+function Get-CodingAgentState {{
+    param([string] $CommandName, [string] $DisplayName)
+    return [pscustomobject] @{{ CommandName = $CommandName; DisplayName = $DisplayName
+        State = 'NotInstalled'; Path = ''; Version = ''; Reason = ''; CandidateCount = 0 }}
+}}
+function Test-CodingAgentIsUsable {{{state_is_usable}}}
+function Test-CodingAgentIsBroken {{{state_is_broken}}}
+function Write-CodingAgentDetectionReport {{{detection_report}}}
 $script:AnswerIndex = 0
 $script:InstallClaudeCode = $true
 $script:InstallCodex = $true
@@ -5058,7 +5763,21 @@ def test_install_ps1_opencode_version_probe_runs_native_command(
     )
     text = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
     body = _braced_body(text, "function Read-OpenCodeVersionOutput")
-    script = f"""$ErrorActionPreference = "Stop"
+    probe_bodies = "\n".join(
+        f"function {name} {{{_braced_body(text, f'function {name}')}}}"
+        for name in (
+            "Format-NativeArgument",
+            "Get-CommandShellExecutable",
+            "New-AgentProbeResult",
+            "Stop-ProbeProcessTree",
+            "Invoke-AgentVersionProbe",
+        )
+    )
+    script = f"""Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+$AgentProbeTimeoutSeconds = 15
+$DryRun = $false
+{probe_bodies}
 function Read-OpenCodeVersionOutput {{{body}}}
 Read-OpenCodeVersionOutput $env:TEST_OPENCODE
 """
