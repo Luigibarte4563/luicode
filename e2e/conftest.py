@@ -14,6 +14,7 @@ import uvicorn
 from playwright.sync_api import Page
 
 from e2e.code_support import CodeControl
+from e2e.usage_support import UsageControl
 from luicode.api.app import create_app
 from luicode.api.ports import ApiServices
 from luicode.application.model_metadata import ProviderModelInfo
@@ -36,12 +37,30 @@ from luicode.harnesses import (
 )
 from luicode.providers.base import BaseProvider, ProviderConfig
 from luicode.providers.runtime import ProviderRuntime
+from luicode.runtime import usage_sqlite
 from luicode.runtime.application import ApplicationRuntime
 from luicode.runtime.asgi import RuntimeASGIApp
 from luicode.runtime.configuration import ConfigurationService
 from luicode.runtime.folder_picker import NativeFolderPicker
 from luicode.runtime.provider_manager import ProviderRuntimeManager
 from tests.web_tools_support import StubWebToolsClient
+
+_USAGE_CONTROL: list[UsageControl] = []
+
+
+@pytest.fixture
+def isolated_usage_store():
+    """The usage database is a process singleton; never reuse a stale one."""
+    usage_sqlite._USAGE_DB_INSTANCE = None
+    yield
+    usage_sqlite._USAGE_DB_INSTANCE = None
+
+
+@pytest.fixture
+def usage_control(isolated_usage_store, admin_base_url: str) -> UsageControl:
+    """Record usage against the runtime that is actually serving the browser."""
+    assert _USAGE_CONTROL, "the admin fixture did not publish a usage control"
+    return _USAGE_CONTROL[0]
 
 
 class _ModelListingProvider(BaseProvider):
@@ -262,6 +281,7 @@ def admin_base_url(
         transcriber=None,
         code_service=code_control.service,
     )
+    usage_control = UsageControl(runtime)
     monkeypatch.setattr(
         NativeFolderPicker,
         "_select",
@@ -313,6 +333,7 @@ def admin_base_url(
 
     async def serve() -> None:
         code_control.loop = asyncio.get_running_loop()
+        usage_control.loop = asyncio.get_running_loop()
         await server.serve(sockets=[listener])
 
     def run_server() -> None:
@@ -342,8 +363,10 @@ def admin_base_url(
             if time.monotonic() >= deadline:
                 raise TimeoutError("Admin browser-test server did not start")
             time.sleep(0.01)
+        _USAGE_CONTROL.append(usage_control)
         yield f"http://127.0.0.1:{port}"
     finally:
+        _USAGE_CONTROL.clear()
         server.should_exit = True
         thread.join(timeout=5.0)
         listener.close()

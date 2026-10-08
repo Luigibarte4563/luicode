@@ -22,6 +22,18 @@ $RepoReleasesFeedUrl = "https://github.com/$RepoSlug/releases.atom"
 # Windows on ARM emulates x64, whose Python package ecosystem has broader wheel support.
 $PythonRequest = "cpython-3.14.0-windows-x86_64-none"
 $MinUvVersion = "0.12.13"
+# A stale launcher on PATH must never stall the whole installation, so every
+# agent validation runs under a hard timeout instead of an open-ended call.
+$AgentProbeTimeoutSeconds = 15
+if (-not [string]::IsNullOrWhiteSpace($env:LUICODE_AGENT_PROBE_TIMEOUT_SECONDS)) {
+    $agentProbeTimeoutOverride = 0
+    if (
+        [int]::TryParse($env:LUICODE_AGENT_PROBE_TIMEOUT_SECONDS, [ref] $agentProbeTimeoutOverride) -and
+        $agentProbeTimeoutOverride -ge 1
+    ) {
+        $AgentProbeTimeoutSeconds = $agentProbeTimeoutOverride
+    }
+}
 $ClaudeInstallUrl = "https://claude.ai/install.ps1"
 $CodexInstallUrl = "https://chatgpt.com/codex/install.ps1"
 $PiInstallUrl = "https://pi.dev/install.ps1"
@@ -68,6 +80,19 @@ $LuicodeCommands = @(
     "luicode-upgrade",
     "luicode-init",
     "luicode"
+)
+# Ordered so the detection report and the prompts follow one stable sequence.
+$CodingAgentCatalog = @(
+    [pscustomobject] @{ CommandName = "claude"; DisplayName = "Claude Code"; LuicodeCommand = "luicode-claude"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "codex"; DisplayName = "Codex"; LuicodeCommand = "luicode-codex"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "pi"; DisplayName = "Pi"; LuicodeCommand = "luicode-pi"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "opencode"; DisplayName = "OpenCode"; LuicodeCommand = "luicode-opencode"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "cline"; DisplayName = "Cline CLI"; LuicodeCommand = "luicode-cline"; DefaultYes = $false }
+    [pscustomobject] @{ CommandName = "hermes"; DisplayName = "Hermes Agent"; LuicodeCommand = "luicode-hermes"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "dsh"; DisplayName = "DeepSeek Harness"; LuicodeCommand = "luicode-dsh"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "grok"; DisplayName = "Grok Build"; LuicodeCommand = "luicode-grok"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "muse"; DisplayName = "Muse Code"; LuicodeCommand = "luicode-muse"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "aider"; DisplayName = "Aider"; LuicodeCommand = "luicode-aider"; DefaultYes = $true }
 )
 
 function Show-Usage {
@@ -119,13 +144,15 @@ function Read-YesNo {
     }
 }
 
-function Find-InstalledCodingAgent {
+function Get-InstalledCodingAgentCandidates {
+    # Only discovery happens here. A candidate proves nothing about whether the
+    # agent runs, so callers must validate the command before trusting it.
     param([string] $CommandName)
 
     $originalPath = $env:Path
     try {
         if ($CommandName -eq "opencode" -and $script:OriginalOpenCode) {
-            return $script:OriginalOpenCode
+            return @($script:OriginalOpenCode)
         }
         if ($CommandName -in @("pi", "cline", "dsh")) {
             try {
@@ -135,8 +162,8 @@ function Find-InstalledCodingAgent {
                 # An optional lookup must not prevent choosing other harnesses.
             }
         }
-        $command = Get-ApplicationCommand $CommandName
-        if (-not $command) {
+        $commands = @(Get-ApplicationCommands -Name $CommandName)
+        if ($commands.Count -eq 0) {
             if ($CommandName -eq "aider") {
                 if ($env:UV_TOOL_BIN_DIR) {
                     Add-PathEntry $env:UV_TOOL_BIN_DIR
@@ -150,22 +177,17 @@ function Find-InstalledCodingAgent {
                 elseif ($env:USERPROFILE) {
                     Add-PathEntry (Join-Path $env:USERPROFILE ".local\bin")
                 }
-                $command = Get-ApplicationCommand $CommandName
+                $commands = @(Get-ApplicationCommands -Name $CommandName)
             }
             elseif ($CommandName -eq "muse") {
                 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
                 if (-not [string]::IsNullOrWhiteSpace($userPath)) {
                     $env:Path = "$originalPath$([IO.Path]::PathSeparator)$userPath"
-                    $command = Get-ApplicationCommand $CommandName
+                    $commands = @(Get-ApplicationCommands -Name $CommandName)
                 }
             }
         }
-        if ($CommandName -eq "pi" -and $command -and (-not $DryRun)) {
-            if (-not (Test-PiApplication $command)) {
-                return $null
-            }
-        }
-        return $command
+        return @($commands)
     }
     finally {
         # Environment variables are process-wide, even inside a function.
@@ -173,39 +195,266 @@ function Find-InstalledCodingAgent {
     }
 }
 
+function Find-InstalledCodingAgent {
+    param([string] $CommandName)
+
+    $candidates = @(Get-InstalledCodingAgentCandidates -CommandName $CommandName)
+    if ($candidates.Count -eq 0) {
+        return $null
+    }
+    return $candidates[0]
+}
+
+function Test-CodingAgentIsUsable {
+    param($State)
+
+    # An unknown state is never treated as broken: the later Ensure pass still
+    # verifies the agent, so an inconclusive probe must not block the install.
+    return ($State.State -eq "Working") -or ($State.State -eq "Unknown")
+}
+
+function Test-CodingAgentIsBroken {
+    # Unrecognized is deliberately excluded: a foreign program owning the
+    # command name is simply not the agent, so the install prompt already covers
+    # it and a repair offer would be misleading.
+    param($State)
+
+    return (
+        ($State.State -eq "Broken") -or
+        ($State.State -eq "VersionCheckFailed")
+    )
+}
+
+function Get-ProbeDetailLine {
+    param($Probe)
+
+    foreach ($stream in @($Probe.StandardError, $Probe.StandardOutput)) {
+        foreach ($line in ($stream -split "`r?`n")) {
+            $trimmed = $line.Trim()
+            if ($trimmed) {
+                return $trimmed
+            }
+        }
+    }
+    return ""
+}
+
+function Test-CodingAgentIdentity {
+    # Detects a different program that happens to own the command name.
+    param(
+        $Command,
+        [string] $CommandName
+    )
+
+    if ($CommandName -ne "pi") {
+        return $true
+    }
+    $probe = Invoke-AgentVersionProbe -FilePath $Command.Source -Arguments @("--help")
+    if ($probe.StartFailed -or $probe.TimedOut -or $probe.ExitCode -ne 0) {
+        return $false
+    }
+    $helpText = "$($probe.StandardOutput)`n$($probe.StandardError)"
+    return ($helpText.Contains("--extension") -and $helpText.Contains("--models"))
+}
+
+function Get-CodingAgentState {
+    param(
+        [string] $CommandName,
+        [string] $DisplayName
+    )
+
+    $candidates = @(Get-InstalledCodingAgentCandidates -CommandName $CommandName)
+    if ($candidates.Count -eq 0) {
+        return [pscustomobject] @{
+            CommandName = $CommandName; DisplayName = $DisplayName; State = "NotInstalled"
+            Path = ""; Version = ""; Reason = ""; CandidateCount = 0
+        }
+    }
+
+    # The first PATH entry is what the user's own shell would run, so only that
+    # candidate decides the state. Extra copies are reported, never preferred.
+    $command = $candidates[0]
+    $state = [pscustomobject] @{
+        CommandName = $CommandName; DisplayName = $DisplayName; State = "Unknown"
+        Path = $command.Source; Version = ""; Reason = ""; CandidateCount = $candidates.Count
+    }
+    if ($DryRun) {
+        $state.Reason = "the dry run does not execute coding agents"
+        return $state
+    }
+
+    $probe = Invoke-AgentVersionProbe -FilePath $command.Source
+    if ($probe.StartFailed) {
+        $state.State = "Unknown"
+        $state.Reason = "could not start the command: $(Get-ProbeDetailLine $probe)"
+        return $state
+    }
+    if ($probe.TimedOut) {
+        $state.State = "VersionCheckFailed"
+        $state.Reason = "the command did not answer '--version' within $AgentProbeTimeoutSeconds seconds"
+        return $state
+    }
+    if ($probe.ExitCode -ne 0) {
+        $state.State = "Broken"
+        $detail = Get-ProbeDetailLine $probe
+        $state.Reason = "exit code $($probe.ExitCode)"
+        if ($detail) {
+            $state.Reason = "$($state.Reason): $detail"
+        }
+        return $state
+    }
+    if (-not (Test-CodingAgentIdentity -Command $command -CommandName $CommandName)) {
+        $state.State = "Unrecognized"
+        $state.Reason = "the command at this path is not the expected coding agent"
+        return $state
+    }
+    if ([string]::IsNullOrWhiteSpace($probe.StandardOutput)) {
+        $state.State = "VersionCheckFailed"
+        $state.Reason = "the command exited successfully but printed no version"
+        return $state
+    }
+
+    $state.State = "Working"
+    # Report exactly what the agent printed, so the value is traceable to the
+    # tool rather than to installer-side parsing.
+    $state.Version = (Get-ProbeDetailLine $probe)
+    return $state
+}
+
+function Write-CodingAgentDetectionReport {
+    param([object[]] $States)
+
+    Write-Step "Detecting existing coding agents"
+
+    $working = 0
+    $broken = 0
+    $missing = 0
+    $unknown = 0
+    foreach ($state in $States) {
+        if ($state.State -eq "NotInstalled") {
+            $missing++
+            continue
+        }
+
+        Write-Host ""
+        Write-Host $state.DisplayName
+        if ($state.State -eq "Working") {
+            $working++
+            Write-Host "  ok found and working"
+            Write-Host "  Version: $($state.Version)"
+            continue
+        }
+        if (Test-CodingAgentIsUsable $state) {
+            # Unknown means the probe could not conclude, which is not a failure.
+            $unknown++
+            Write-Host "  ?  found but could not be validated"
+            Write-Host "  Path: $($state.Path)"
+            if ($state.Reason) {
+                Write-Host "  Reason: $($state.Reason)"
+            }
+            continue
+        }
+
+        $broken++
+        if ($state.State -eq "Unrecognized") {
+            Write-Host "  !  found but is not the expected application"
+        }
+        else {
+            Write-Host "  !  found but appears broken"
+        }
+        Write-Host "  Path: $($state.Path)"
+        if ($state.Reason) {
+            Write-Host "  Reason: $($state.Reason)"
+        }
+        if ($state.CandidateCount -gt 1) {
+            Write-Host "  Note: $($state.CandidateCount) '$($state.CommandName)' commands are on PATH; the first one wins."
+        }
+    }
+
+    Write-Host ""
+    Write-Step "Existing agent summary"
+    Write-Host "Working: $working"
+    Write-Host "Broken: $broken"
+    Write-Host "Not installed: $missing"
+    if ($unknown -gt 0) {
+        Write-Host "Undetermined: $unknown"
+    }
+    Write-Host ""
+    Write-Host "A broken optional coding agent does not prevent luicode from installing."
+}
+
 function Read-CodingAgentSelection {
     param(
         [string] $CommandName,
         [string] $DisplayName,
         [string] $LuicodeCommand,
-        [bool] $DefaultYes = $true
+        [bool] $DefaultYes = $true,
+        $State = $null
     )
 
-    if (Find-InstalledCodingAgent $CommandName) {
-        Write-Host "$DisplayName already installed; will verify."
+    if ($null -eq $State) {
+        $State = Get-CodingAgentState -CommandName $CommandName -DisplayName $DisplayName
+    }
+    if (Test-CodingAgentIsUsable $State) {
+        if ($State.State -eq "Working") {
+            Write-Host "$DisplayName already installed and working."
+        }
+        else {
+            Write-Host "$DisplayName found on PATH; it will be verified during installation."
+        }
         return $true
+    }
+    if (Test-CodingAgentIsBroken $State) {
+        # Never overwrite a broken installation on the user's behalf. Reporting
+        # and continuing keeps a stale launcher from blocking luicode.
+        Write-Warning "$DisplayName was detected but failed validation. luicode does not depend on $DisplayName."
+        if (-not (Read-YesNo -Prompt "Would you like luicode to attempt to repair ${DisplayName}?" -DefaultYes $false)) {
+            Write-Host "Continuing without $DisplayName."
+            return $false
+        }
     }
     return Read-YesNo -Prompt "Install $DisplayName for ${LuicodeCommand}?" -DefaultYes $DefaultYes
 }
 
 function Select-CodingAgents {
+    $states = @{}
+    $ordered = @()
+    foreach ($agent in $CodingAgentCatalog) {
+        $state = Get-CodingAgentState -CommandName $agent.CommandName -DisplayName $agent.DisplayName
+        $states[$agent.CommandName] = $state
+        $ordered += $state
+    }
+    Write-CodingAgentDetectionReport -States $ordered
+
+    # Cline keeps its historical npm-aware default for a genuinely absent agent.
+    $defaults = @{}
+    foreach ($agent in $CodingAgentCatalog) {
+        $defaults[$agent.CommandName] = $agent.DefaultYes
+    }
+    $defaults["cline"] = $script:InstallCline
+
     while ($true) {
-        $script:InstallClaudeCode = Read-CodingAgentSelection claude "Claude Code" luicode-claude
-        $script:InstallCodex = Read-CodingAgentSelection codex Codex luicode-codex
-        $script:InstallPi = Read-CodingAgentSelection pi Pi luicode-pi
-        $script:InstallOpenCode = Read-CodingAgentSelection opencode OpenCode luicode-opencode
-        $script:InstallCline = Read-CodingAgentSelection cline "Cline CLI" luicode-cline `
-            -DefaultYes $script:InstallCline
-        $script:InstallHermes = Read-CodingAgentSelection hermes "Hermes Agent" luicode-hermes `
-            -DefaultYes $script:InstallHermes
-        $script:InstallDsh = Read-CodingAgentSelection dsh "DeepSeek Harness" luicode-dsh `
-            -DefaultYes $script:InstallDsh
-        $script:InstallGrok = Read-CodingAgentSelection grok "Grok Build" luicode-grok `
-            -DefaultYes $script:InstallGrok
-        $script:InstallMuse = Read-CodingAgentSelection muse "Muse Code" luicode-muse `
-            -DefaultYes $script:InstallMuse
-        $script:InstallAider = Read-CodingAgentSelection aider Aider luicode-aider `
-            -DefaultYes $script:InstallAider
+        Write-Step "Optional luicode coding agents"
+        foreach ($agent in $CodingAgentCatalog) {
+            $value = Read-CodingAgentSelection `
+                -CommandName $agent.CommandName `
+                -DisplayName $agent.DisplayName `
+                -LuicodeCommand $agent.LuicodeCommand `
+                -DefaultYes $defaults[$agent.CommandName] `
+                -State $states[$agent.CommandName]
+            switch ($agent.CommandName) {
+                "claude" { $script:InstallClaudeCode = $value }
+                "codex" { $script:InstallCodex = $value }
+                "pi" { $script:InstallPi = $value }
+                "opencode" { $script:InstallOpenCode = $value }
+                "cline" { $script:InstallCline = $value }
+                "hermes" { $script:InstallHermes = $value }
+                "dsh" { $script:InstallDsh = $value }
+                "grok" { $script:InstallGrok = $value }
+                "muse" { $script:InstallMuse = $value }
+                "aider" { $script:InstallAider = $value }
+            }
+        }
 
         if ($script:InstallClaudeCode -or $script:InstallCodex -or $script:InstallPi -or $script:InstallOpenCode -or $script:InstallCline -or $script:InstallHermes -or $script:InstallDsh -or $script:InstallGrok -or $script:InstallMuse -or $script:InstallAider) {
             break
@@ -215,9 +464,18 @@ function Select-CodingAgents {
     }
 
     if (-not $script:EnableRtk) {
-        if (Get-ApplicationCommand "rtk") {
+        $rtkState = Get-CodingAgentState -CommandName "rtk" -DisplayName "RTK"
+        if (Test-CodingAgentIsUsable $rtkState) {
             Write-Host "RTK already installed; will verify."
             $script:EnableRtk = $true
+        }
+        elseif (Test-CodingAgentIsBroken $rtkState) {
+            Write-Host "RTK is installed but appears broken."
+            Write-Host "luicode can continue without RTK."
+            if (Read-YesNo -Prompt "Would you like luicode to attempt to repair RTK?" -DefaultYes $false) {
+                Write-Host "Replacing RTK was accepted; the installer will install the pinned release."
+                $script:EnableRtk = $true
+            }
         }
         else {
             $script:EnableRtk = Read-YesNo `
@@ -267,6 +525,138 @@ function Invoke-NativeCommand {
     }
 }
 
+function Get-CommandShellExecutable {
+    # .cmd and .bat launchers cannot be created directly by CreateProcess, so
+    # they are run through the Windows command shell instead.
+    if (-not [string]::IsNullOrWhiteSpace($env:ComSpec)) {
+        return $env:ComSpec
+    }
+
+    $systemRoot = if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { $env:SYSTEMROOT } else { $env:SystemRoot }
+    if (-not [string]::IsNullOrWhiteSpace($systemRoot)) {
+        return (Join-Path $systemRoot "System32\cmd.exe")
+    }
+
+    throw "Unable to locate cmd.exe to validate a Windows command launcher."
+}
+
+function Format-NativeArgument {
+    param([string] $Value)
+
+    if ($Value -match '^[A-Za-z0-9_./:@%+=,\-]+$' -and ($Value -notmatch '^[A-Za-z0-9_.]+:$')) {
+        return $Value
+    }
+    # Backslashes are only doubled when they precede a quote or end the argument.
+    return '"' + (($Value -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+}
+
+function New-AgentProbeResult {
+    param(
+        [string] $Path,
+        [int] $ExitCode,
+        [string] $StandardOutput = "",
+        [string] $StandardError = "",
+        [bool] $TimedOut = $false,
+        [bool] $StartFailed = $false
+    )
+
+    return [pscustomobject] @{
+        Path = $Path
+        ExitCode = $ExitCode
+        StandardOutput = $StandardOutput
+        StandardError = $StandardError
+        TimedOut = $TimedOut
+        StartFailed = $StartFailed
+    }
+}
+
+function Stop-ProbeProcessTree {
+    param($Process)
+
+    try {
+        if ($null -ne $Process -and (-not $Process.HasExited)) {
+            $taskkill = Join-Path $env:SystemRoot "System32\taskkill.exe"
+            if (Test-Path -LiteralPath $taskkill -PathType Leaf) {
+                $process = Start-Process -FilePath $taskkill -ArgumentList @("/PID", "$($Process.Id)", "/T", "/F") -WindowStyle Hidden -PassThru -Wait
+                $process.Dispose()
+            }
+            else {
+                $Process.Kill()
+            }
+        }
+    }
+    catch {
+        # A probe that cannot be killed is reported as timed out below.
+    }
+}
+
+function Invoke-AgentVersionProbe {
+    # Runs a coding agent's version command under a hard timeout and returns the
+    # outcome instead of throwing, so one broken agent cannot stop the install.
+    param(
+        [string] $FilePath,
+        [string[]] $Arguments = @("--version"),
+        [int] $TimeoutSeconds = 0
+    )
+
+    if ($TimeoutSeconds -le 0) {
+        $TimeoutSeconds = $AgentProbeTimeoutSeconds
+    }
+
+    $argumentLine = ($Arguments | ForEach-Object { Format-NativeArgument $_ }) -join " "
+    $extension = [IO.Path]::GetExtension($FilePath).ToLowerInvariant()
+    $launcher = $FilePath
+    $launcherArguments = $argumentLine
+    if ($extension -notin @(".exe", ".com")) {
+        $launcher = Get-CommandShellExecutable
+        # The doubled outer quotes are what cmd requires for a quoted path.
+        $launcherArguments = '/d /s /c ""{0}" {1}"' -f $FilePath, $argumentLine
+    }
+
+    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("luicode-agent-probe-" + [guid]::NewGuid().ToString("N"))
+    $stdoutPath = Join-Path $temporaryRoot "stdout.txt"
+    $stderrPath = Join-Path $temporaryRoot "stderr.txt"
+    $process = $null
+    try {
+        New-Item -ItemType Directory -Path $temporaryRoot -Force -ErrorAction Stop | Out-Null
+        try {
+            $process = Start-Process `
+                -FilePath $launcher `
+                -ArgumentList $launcherArguments `
+                -WindowStyle Hidden `
+                -PassThru `
+                -RedirectStandardOutput $stdoutPath `
+                -RedirectStandardError $stderrPath `
+                -ErrorAction Stop
+        }
+        catch {
+            return New-AgentProbeResult -Path $FilePath -ExitCode -1 -StartFailed $true `
+                -StandardError $_.Exception.Message
+        }
+
+        # Windows PowerShell needs the handle retained to report the exit code.
+        [void] $process.Handle
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            Stop-ProbeProcessTree -Process $process
+            [void] $process.WaitForExit(5000)
+            return New-AgentProbeResult -Path $FilePath -ExitCode -1 -TimedOut $true
+        }
+
+        $standardOutput = if (Test-Path -LiteralPath $stdoutPath) { [IO.File]::ReadAllText($stdoutPath) } else { "" }
+        $standardError = if (Test-Path -LiteralPath $stderrPath) { [IO.File]::ReadAllText($stderrPath) } else { "" }
+        return New-AgentProbeResult -Path $FilePath -ExitCode $process.ExitCode `
+            -StandardOutput $standardOutput -StandardError $standardError
+    }
+    catch {
+        return New-AgentProbeResult -Path $FilePath -ExitCode -1 -StartFailed $true `
+            -StandardError $_.Exception.Message
+    }
+    finally {
+        if ($null -ne $process) { $process.Dispose() }
+        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-Utf8NativeCapture {
     param(
         [string] $FilePath,
@@ -292,10 +682,18 @@ function Invoke-Utf8NativeCapture {
     return ($output | Out-String).Trim()
 }
 
+function Get-ApplicationCommands {
+    # Every PATH match, so a second installation can be reported instead of
+    # silently shadowed by the first one.
+    param([string] $Name)
+
+    return @(Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue)
+}
+
 function Get-ApplicationCommand {
     param([string] $Name)
 
-    $commands = @(Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue)
+    $commands = @(Get-ApplicationCommands -Name $Name)
     if ($commands.Count -eq 0) {
         return $null
     }
@@ -776,29 +1174,19 @@ function Test-SupportedStableVersion {
 function Read-OpenCodeVersionOutput {
     param([string] $OpenCodePath)
 
-    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("luicode-opencode-version-" + [guid]::NewGuid().ToString("N"))
-    $stdoutPath = Join-Path $temporaryRoot "stdout.txt"
-    $stderrPath = Join-Path $temporaryRoot "stderr.txt"
-    $process = $null
-    try {
-        New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
-        $process = Start-Process -FilePath $OpenCodePath -ArgumentList @("--version") -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
-        # Windows PowerShell needs the handle retained to report the exit code.
-        [void] $process.Handle
-        if (-not $process.WaitForExit(10000)) {
-            & "$env:SYSTEMROOT\System32\taskkill.exe" /PID $process.Id /T /F *> $null
-            [void] $process.WaitForExit(5000)
-            throw "OpenCode version probe timed out at '$OpenCodePath'."
-        }
-        if ($process.ExitCode -ne 0) {
-            throw "OpenCode version probe failed at '$OpenCodePath' (exit code $($process.ExitCode))."
-        }
-        return [IO.File]::ReadAllText($stdoutPath)
+    # Shares the bounded probe so a hung OpenCode cannot stall the installer,
+    # while keeping this call site's throwing contract.
+    $probe = Invoke-AgentVersionProbe -FilePath $OpenCodePath
+    if ($probe.TimedOut) {
+        throw "OpenCode version probe timed out at '$OpenCodePath'."
     }
-    finally {
-        if ($null -ne $process) { $process.Dispose() }
-        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ($probe.StartFailed) {
+        throw "OpenCode version probe could not start '$OpenCodePath'."
     }
+    if ($probe.ExitCode -ne 0) {
+        throw "OpenCode version probe failed at '$OpenCodePath' (exit code $($probe.ExitCode))."
+    }
+    return $probe.StandardOutput
 }
 
 function Get-OpenCodeVersion {
