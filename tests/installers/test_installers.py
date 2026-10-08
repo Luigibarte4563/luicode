@@ -1070,7 +1070,10 @@ def test_install_sh_reports_working_existing_agents_with_versions(
     for command in CODING_AGENTS:
         posix_harness.add_client(command)
 
-    result = posix_harness.run_interactive("")
+    # Every agent is working, so no agent is prompted for and only the RTK
+    # question is left. Supplying no input at all leaves that read waiting on a
+    # pty that never delivers EOF, which the harness reports as a timeout.
+    result = posix_harness.run_interactive("\n")
 
     assert result.returncode == 0, result.stdout
     assert "==> Detecting existing coding agents" in result.stdout
@@ -1130,6 +1133,27 @@ def test_install_sh_broken_launcher_does_not_abort_the_installation(
     calls = posix_harness.calls()
     assert "codex:--version" in calls
     assert not any("chatgpt.com" in call for call in calls)
+
+
+def test_install_sh_terminates_after_reporting_working_agents(
+    posix_harness: PosixHarness,
+) -> None:
+    """Pin the prompt count for the all-agents-working path.
+
+    A second, deliberately invalid answer follows the RTK answer. If the
+    installer asked anything beyond that single question it would consume this
+    line, reject it, and block re-prompting on a pty that cannot answer.
+    """
+    for command in CODING_AGENTS:
+        posix_harness.add_client(command)
+
+    result = posix_harness.run_interactive("\nnot-an-answer\n")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.count("Enable RTK token optimization") == 1
+    assert "Please answer Y or N." not in result.stdout
+    assert "Working: 10" in result.stdout
+    assert "luicode is installed and verified." in result.stdout
 
 
 def test_install_sh_report_lists_each_agent_in_its_own_state(
