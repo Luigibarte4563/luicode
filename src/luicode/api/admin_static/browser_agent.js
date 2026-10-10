@@ -252,7 +252,12 @@
     const cancel = byId("cancelJevDialog");
     if (cancel) cancel.addEventListener("click", () => byId("jevDialog").close());
     const consent = byId("jevConsent");
-    if (consent) consent.addEventListener("change", syncConnectButton);
+    if (consent) {
+      consent.addEventListener("change", () => {
+        consentGiven = consent.checked;
+        syncConnectButton();
+      });
+    }
     const confirm = byId("confirmJevConnect");
     if (confirm) confirm.addEventListener("click", submitConnect);
     document.addEventListener("input", (event) => {

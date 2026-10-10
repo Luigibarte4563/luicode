@@ -100,6 +100,44 @@ def test_no_inline_script_tags_were_added():
     assert not re.search(r"<script(?![^>]*src=)", INDEX)
 
 
+def test_consent_checkbox_actually_updates_consent_state():
+    """Regression: the Connect button must be able to enable at all.
+
+    The checkbox listener has to assign ``consentGiven`` from ``consent.checked``.
+    Binding the handler straight to ``syncConnectButton`` left the flag stuck at
+    false, so the button could never enable and Connect was unusable.
+    """
+    # Match the whole handler body up to its closing "});" so the assertion can
+    # see both statements rather than stopping at the first inner brace.
+    listener = re.search(
+        r'addEventListener\("change",\s*\(\)\s*=>\s*\{(.*?)\}\);',
+        BROWSER_JS,
+        flags=re.DOTALL,
+    )
+    assert listener, (
+        "the consent change handler must set consentGiven from consent.checked"
+    )
+    body = listener.group(1)
+    assert re.search(r"consentGiven\s*=\s*consent\.checked;", body), (
+        "the consent change handler must set consentGiven from consent.checked"
+    )
+    # The handler must also re-evaluate the button, not only flip the flag.
+    assert "syncConnectButton()" in body
+
+
+def test_connect_button_stays_disabled_without_consent_and_key():
+    """SEC-2: the button requires both the acknowledgement and a TypeSafe key."""
+    assert "consentGiven && key" in BROWSER_JS
+    assert re.search(r"button\.disabled\s*=\s*!\(consentGiven\s*&&\s*key", BROWSER_JS)
+
+
+def test_consent_is_reset_each_time_the_dialog_opens():
+    """A stale acknowledgement must not carry over into a later Connect."""
+    open_dialog = BROWSER_JS[BROWSER_JS.index("function openDialog") :][:800]
+    assert "consentGiven = false;" in open_dialog
+    assert "consent.checked = false;" in open_dialog
+
+
 # ------------------------------------------------------------------- layout
 
 
