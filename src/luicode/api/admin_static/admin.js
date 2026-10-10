@@ -65,6 +65,14 @@ const VIEW_GROUPS = [
     containerId: "view-integrations",
   },
   {
+    id: "browser",
+    label: "Browser agent",
+    title: "Browser Agent",
+    subtitle: "Delegate a web task to a browser agent in one tool call.",
+    sections: ["browser_agent"],
+    containerId: "browserAgentSections",
+  },
+  {
     id: "code",
     label: "Code sessions",
     title: "Code sessions",
@@ -277,7 +285,8 @@ function setActiveView(viewId, { scroll = false } = {}) {
   document.querySelector(".app-shell").classList.toggle("session-active", sessionActive);
   document.querySelector(".main").classList.toggle("session-main", sessionActive);
   document.querySelector(".topbar").hidden = sessionActive;
-  document.querySelector(".action-bar").hidden = sessionActive || activeView.id === "integrations";
+  const ownsOwnActions = activeView.id === "integrations" || activeView.id === "browser";
+  document.querySelector(".action-bar").hidden = sessionActive || ownsOwnActions;
 
   document.querySelectorAll(".nav-link").forEach((link) => {
     const selected = link.dataset.view === activeView.id;
@@ -307,6 +316,9 @@ function setActiveView(viewId, { scroll = false } = {}) {
     refreshJetBrainsIntegration();
     refreshCodexIntegration();
     refreshClaudeDesktopIntegration();
+  }
+  if (activeView.id === "browser" && window.BrowserAgent) {
+    window.BrowserAgent.activate();
   }
 }
 

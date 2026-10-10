@@ -7,8 +7,11 @@ from typing import TYPE_CHECKING
 
 from luicode.api.app import create_app
 from luicode.api.ports import ApiServices
+from luicode.application.browser_agent.admin import BrowserAgentAdminService
+from luicode.application.browser_agent.ports import BrowseTask
+from luicode.application.browser_agent.service import BrowserAgentService
 from luicode.application.code_sessions import CodeService
-from luicode.config.loader import ManagedConfigStore
+from luicode.config.loader import ManagedConfigStore, get_settings
 from luicode.config.logging_config import configure_logging
 from luicode.config.paths import (
     code_database_path,
@@ -29,6 +32,7 @@ if TYPE_CHECKING:
 
 from .application import ApplicationRuntime, RestartCallback
 from .asgi import RuntimeASGIApp
+from .browser_agent.jev import JevBrowserAgent
 from .code_sessions_sqlite import SQLiteCodeStore
 from .codex_app_server import CodexHarnessFactory
 from .codex_catalog import CodexModelCatalogPublisher
@@ -108,6 +112,13 @@ def build_asgi_app(
             config=browser_config,
         )
 
+    # Browser agent (Jev Ultrafast). Off by default; Connect in the Admin UI
+    # enables it. Keys are read per task so Apply takes effect without a restart.
+    browser_agent_service = BrowserAgentService(
+        port=_JevAgentProxy(),
+        settings=settings,
+    )
+
     services = ApiServices(
         requests=provider_manager,
         admin=runtime,
@@ -115,8 +126,45 @@ def build_asgi_app(
         web_tools=HTTPWebToolsClient(),
         browser_tools=browser_tools_service,
         code=code_service,
+        browser_agent=browser_agent_service,
+        browser_agent_admin=BrowserAgentAdminService(
+            store=ManagedConfigStore(),
+            service=browser_agent_service,
+        ),
     )
     return RuntimeASGIApp(create_app(services), runtime)
+
+
+class _JevAgentProxy:
+    """Build a Jev runner from the live settings for each task (FR-24).
+
+    Settings are resolved per call so an Admin Apply takes effect without
+    restarting the server, and no key is captured at process start. The active
+    runner is retained so the Admin Stop button can cancel it (SEC-10).
+    """
+
+    def __init__(self) -> None:
+        self._active: JevBrowserAgent | None = None
+
+    async def run(self, task: BrowseTask, *, cancel_token: object | None = None):
+        settings = get_settings()
+        runner = JevBrowserAgent(
+            typesafe_api_key=settings.typesafe_api_key,
+            text_model_api_key=settings.text_model_api_key,
+            text_model=settings.jev_text_model,
+            max_steps=settings.jev_max_steps,
+            dedicated_profile=settings.jev_dedicated_profile,
+        )
+        self._active = runner
+        try:
+            return await runner.run(task, cancel_token=cancel_token)
+        finally:
+            if self._active is runner:
+                self._active = None
+
+    def cancel_running(self) -> bool:
+        runner = self._active
+        return runner.cancel_running() if runner is not None else False
 
 
 def _load_openai_provider(*, auth: OpenAIAuthManager) -> ProviderFactory:

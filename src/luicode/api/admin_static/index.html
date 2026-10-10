@@ -324,6 +324,63 @@
             </div>
           </section>
 
+          <section id="view-browser" class="admin-view" data-view="browser" hidden>
+            <div class="browser-agent-grid">
+              <article class="provider-strip integration-card">
+                <div class="section-heading">
+                  <div>
+                    <h3>Jev Ultrafast</h3>
+                    <p>Delegate a web task to a browser agent in one tool call.</p>
+                  </div>
+                  <span id="jevStatusPill" class="provider-card-pill">Not connected</span>
+                </div>
+                <p id="jevStatusMessage" class="message-area" role="status" hidden></p>
+                <dl class="jev-meta">
+                  <div><dt>Chrome</dt><dd id="jevChromeStatus">&mdash;</dd></div>
+                  <div><dt>Text model</dt><dd id="jevTextModel">&mdash;</dd></div>
+                  <div><dt>Allowed domains</dt><dd id="jevAllowedDomains">&mdash;</dd></div>
+                </dl>
+                <div class="provider-actions">
+                  <button id="jevConnect" class="primary-button" type="button">Connect</button>
+                  <button id="jevDisconnect" class="ghost-button" type="button" hidden>Disconnect</button>
+                  <button id="jevStop" class="ghost-button" type="button" hidden>Stop</button>
+                </div>
+              </article>
+
+              <article class="provider-strip integration-card">
+                <div class="section-heading">
+                  <div>
+                    <h3>Recent browse tasks</h3>
+                    <p>Goals are redacted by default.</p>
+                  </div>
+                  <button id="jevRefreshRuns" class="ghost-button" type="button">Refresh</button>
+                </div>
+                <div class="section-tabs" role="tablist">
+                  <button class="section-tab active" role="tab" data-panel="jevRuns">Run history</button>
+                </div>
+                <div id="panel-jevRuns" class="section-panel active" role="tabpanel">
+                  <p id="jevRunsEmpty" class="message-area">No browse tasks yet.</p>
+                  <div class="usage-table-container">
+                    <table class="usage-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Status</th>
+                          <th scope="col">Goal</th>
+                          <th scope="col">Start URL</th>
+                          <th scope="col">Steps</th>
+                          <th scope="col">Elapsed</th>
+                        </tr>
+                      </thead>
+                      <tbody id="jevRunsBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div id="browserAgentSections" class="form-sections" aria-label="Browser agent configuration"></div>
+          </section>
+
           <section id="view-code" class="admin-view" data-view="code" hidden>
             <div id="codeRoot" class="code-root session-root" aria-live="off"></div>
           </section>
@@ -357,12 +414,46 @@
         <button id="saveProvider" class="primary-button" type="button" disabled>Save</button>
       </div>
     </dialog>
+    <dialog id="jevDialog" class="integration-dialog provider-dialog" aria-labelledby="jevDialogTitle">
+      <div class="section-heading">
+        <h3 id="jevDialogTitle">Connect Jev Ultrafast</h3>
+        <button id="closeJevDialog" class="ghost-button" type="button" aria-label="Close browser agent setup">&#x2715;</button>
+      </div>
+      <div id="jevDialogBody">
+        <div class="jev-notice">
+          <strong>Page state leaves your machine.</strong>
+          <p>
+            A browse task sends the page's visible text and element list to TypeSafe
+            for action selection and, when a field must be filled, to the configured
+            text-model provider. LUICODE's usual "all processing local" claim does
+            not cover this feature.
+          </p>
+        </div>
+        <div class="section-heading">
+          <div>
+            <h3>These files and settings will change</h3>
+            <ul id="jevChangeList" class="jev-change-list"></ul>
+          </div>
+        </div>
+        <div id="jevFields" class="field-grid"></div>
+        <label class="jev-consent">
+          <input id="jevConsent" type="checkbox" />
+          <span>I understand that page state is processed by TypeSafe and the text-model provider.</span>
+        </label>
+        <div id="jevMessage" class="message-area" role="status"></div>
+      </div>
+      <div class="provider-dialog-footer">
+        <button id="cancelJevDialog" class="secondary-button" type="button">Cancel</button>
+        <button id="confirmJevConnect" class="primary-button" type="button" disabled>Connect</button>
+      </div>
+    </dialog>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/form_controls.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/model_combobox.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/session_ui.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/code_sessions.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/usage.js"></script>
+    <script src="/admin/assets/__LUICODE_VERSION__/browser_agent.js"></script>
     <script src="/admin/assets/__LUICODE_VERSION__/admin.js"></script>
   </body>
 </html>

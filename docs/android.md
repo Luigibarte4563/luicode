@@ -162,6 +162,7 @@ separately, and each has its own Android support status:
 |---------|--------|-------------|
 | Local Whisper transcription (`--voice-local`) | No feasible CPU/CUDA Whisper on Android | Use **NVIDIA NIM remote transcription** (enabled by default) |
 | Browser automation (`browser` extra) | No embeddable Chromium in Termux | Not available on Android |
+| Browser Agent (`browse_web`) | Depends on a real Chrome via `browser-harness` | Not available on Android |
 | Desktop app / tray icon | No desktop environment | Use Termux session + browser |
 
 ## Messaging Integrations (Discord/Telegram)
