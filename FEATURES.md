@@ -10,15 +10,16 @@ LUICode is a **local gateway for agentic coding** that runs your favorite coding
 |-----------|-------------|
 | **luicode-server** | Single local gateway process (FastAPI + Uvicorn) |
 | **Admin UI** | Browser-based management at `http://127.0.0.1:8082/admin` |
-| **Launchers** | `luicode-claude`, `luicode-codex`, `luicode-pi`, `luicode-opencode`, `luicode-cline`, `luicode-hermes`, `luicode-dsh`, `luicode-grok`, `luicode-muse`, `luicode-aider` |
+| **Launchers** | `luicode-claude`, `luicode-codex`, `luicode-pi`, `luicode-opencode`, `luicode-cline`, `luicode-hermes`, `luicode-dsh`, `luicode-grok`, `luicode-muse`, `luicode-aider`, `luicode-desktop` |
 | **Protocol Adapters** | Anthropic Messages, OpenAI Responses, OpenAI Chat Completions |
 | **Loopback-only** | Admin UI binds to `127.0.0.1` / `::1` — no external access |
 
 ---
 
-## Provider Catalog (53+ Providers)
+## Provider Catalog (55+ Providers)
 
 ### Cloud Providers (API Key)
+
 - **NVIDIA NIM** — `nvidia_nim/nvidia/nemotron-3-super-120b-a12b`
 - **OpenRouter** — `open_router/openrouter/free`
 - **Groq** — `groq/llama-3.3-70b-versatile`
@@ -36,7 +37,8 @@ LUICode is a **local gateway for agentic coding** that runs your favorite coding
 - **ZenMux** — `zenmux/deepseek/deepseek-v4-flash-free`
 - **W&B Inference** — `wandb/openai/gpt-oss-20b`
 - **Azure OpenAI** — `azure_openai/<deployment-name>`
-- **Google AI Studio (Gemini)** — `gemini/models/gemini-3.1-flash-lite`
+- **OpenAI API** — `openai_api/gpt-5.6-sol`
+- **Gemini** — `gemini/models/gemini-3.1-flash-lite`
 - **Google Vertex AI** — `vertex/google/gemini-3.5-flash`
 - **DeepSeek** — `deepseek/deepseek-chat`
 - **Mistral La Plateforme** — `mistral/devstral-small-latest`
@@ -56,6 +58,7 @@ LUICode is a **local gateway for agentic coding** that runs your favorite coding
 - **Kilo.ai** — `kilo/kilo-auto/free`
 - **Fireworks AI** — `fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct`
 - **Novita AI** — `novita/deepseek/deepseek-v4-flash-0731`
+- **Cheaper Inference** — `cheaperinference/gpt-5.4-mini`
 - **Cloudflare Workers AI** — `cloudflare/@cf/moonshotai/kimi-k2.6`
 - **Z.ai Coding Plan** — `zai/glm-5.2`
 - **Z.ai API** — `zai_api/glm-4.7-flash`
@@ -69,10 +72,12 @@ LUICode is a **local gateway for agentic coding** that runs your favorite coding
 - **Ollama Cloud** — `ollama_cloud/qwen3-coder:480b`
 
 ### OAuth / Connected Account Providers
+
 - **OpenAI / ChatGPT** — Uses ChatGPT subscription via OAuth (device/browser flow)
 - **GitHub Copilot** — Uses GitHub account + Copilot subscription via GitHub CLI
 
 ### Local Providers (No API Key)
+
 - **LM Studio** — `lmstudio/<model-id>` (default `http://localhost:1234/v1`)
 - **llama.cpp** — `llamacpp/<model-id>` (default `http://localhost:8080/v1`)
 - **Ollama** — `ollama/<model-tag>` (default `http://localhost:11434`)
@@ -114,21 +119,6 @@ LUICode is a **local gateway for agentic coding** that runs your favorite coding
 
 ---
 
-## Web Tools (Built-in)
-
-| Tool | Description | Configuration |
-|------|-------------|---------------|
-| **web_search** | Local web search via configured search provider | `ENABLE_WEB_SERVER_TOOLS=true` (default) |
-| **web_fetch** | Fetch and extract content from URLs | `WEB_FETCH_ALLOWED_SCHEMES=http,https` |
-| **Automatic Web Search** | Detects when agents need search, executes locally | Built-in heuristic + domain filtering |
-
-### Web Fetch Security
-- **Egress policy**: Blocks private/link-local IPs by default
-- `WEB_FETCH_ALLOW_PRIVATE_NETWORKS=false` (lab only)
-- Configurable allowed URL schemes
-
----
-
 ## Token-Saving Optimizations (Up to 90% fewer terminal-output tokens)
 
 | Optimization | Setting | Description |
@@ -138,6 +128,7 @@ LUICode is a **local gateway for agentic coding** that runs your favorite coding
 | **Suggestion Mode Skip** | `ENABLE_SUGGESTION_MODE_SKIP=true` | Skips suggestion/completion-only requests |
 | **Filepath Extraction Mock** | `ENABLE_FILEPATH_EXTRACTION_MOCK=true` | Extracts filepaths locally without provider call |
 | **RTK Integration** | Optional extra | Filters common command output (ls, grep, etc.) |
+| **Fast Prefix Detection** | `FAST_PREFIX_DETECTION=true` | Detects command prefixes locally, avoiding provider calls |
 
 All enabled by default. Each optimization targets a specific Anthropic/Claude Code token pattern.
 
@@ -175,6 +166,7 @@ Native **Codex sessions in your browser** with real-time and background support:
 | **Codex in VS Code & App** | Codex extension + desktop app | Configures Codex to use luicode |
 | **Claude Code in JetBrains ACP** | JetBrains IDEs via ACP | Routes Claude Code through luicode |
 | **Claude Code in App** | Claude Desktop app | Sets luicode as gateway |
+| **Desktop (Windows/macOS)** | Tray / menu-bar icon | Open Admin, restart, or quit |
 
 ### Workflow
 1. Click **Connect** in Admin UI → Integrations tab
@@ -240,7 +232,7 @@ async def my_handler(browser_tools: BrowserToolsPort):
 
 ---
 
-## Supported Coding Agents (10)
+## Supported Coding Agents (11)
 
 | Agent | Launcher | Notes | Android/Termux |
 |-------|----------|-------|----------------|
@@ -254,6 +246,7 @@ async def my_handler(browser_tools: BrowserToolsPort):
 | **Grok Build** | `luicode-grok` | xAI | ✅ Supported |
 | **Muse Code** | `luicode-muse` | Meta | ❌ No Android support |
 | **Aider** | `luicode-aider` | Terminal-based | ✅ Supported |
+| **Desktop** | `luicode-desktop` | GUI launcher | ✅ Supported |
 
 ---
 
@@ -296,7 +289,7 @@ async def my_handler(browser_tools: BrowserToolsPort):
 | Metric | Description |
 |--------|-------------|
 | **Token counts** | Input/output/cache tokens per request, provider, model, and agent |
-| **Cost estimation** | Bundled price table (src/luicode/application/usage/data/pricing.toml) with user overrides (~/.luicode/pricing.override.toml) |
+| **Cost estimation** | Bundled price table (`src/luicode/application/usage/data/pricing.toml`) with user overrides (`~/.luicode/pricing.override.toml`) |
 | **Optimization savings** | Real token counts from intercepted requests (not hardcoded constants) |
 | **Time series** | Requests, tokens, and cost bucketed to the selected range (1 min to 6 h) |
 | **Live updates** | SSE feed on committed rows; the tab refreshes itself, with polling backstops for provider health and missed events |
@@ -314,7 +307,7 @@ async def my_handler(browser_tools: BrowserToolsPort):
 - **Last error** — Truncated error message for quick triage
 
 ### Data Retention
-- **SQLite storage** — ~/.luicode/usage/usage.db (WAL mode, separate from code.db)
+- **SQLite storage** — `~/.luicode/usage/usage.db` (WAL mode, separate from code.db)
 - **Default retention** — 90 days or 100k rows, configurable
 - **Background writer** — Batched flush every ~1s, never blocks request path
 
@@ -438,10 +431,18 @@ MODEL_FABLE=
 MODEL_OPUS=
 MODEL_SONNET=
 MODEL_HAIKU=
-```
 
-### Reasoning
-```bash
+# Rate limiting
+PROVIDER_RATE_LIMIT=60
+PROVIDER_RATE_WINDOW=60
+PROVIDER_MAX_CONCURRENCY=8
+
+# Model stream holdback (seconds; 0 = disabled)
+# When positive, the first N seconds of SSE are retained so an early
+# upstream cutoff can be retried without losing the start of the response.
+PROVIDER_STREAM_HOLDBACK_SECONDS=0.0
+
+# Reasoning
 REASONING_POLICY=client      # client, off, low, medium, high, xhigh, max
 REASONING_FABLE=inherit      # inherit, client, off, low...
 REASONING_OPUS=inherit
@@ -449,38 +450,19 @@ REASONING_SONNET=inherit
 REASONING_HAIKU=inherit
 ```
 
-### Optimizations
-```bash
+# Optimizations
 ENABLE_NETWORK_PROBE_MOCK=true
 ENABLE_TITLE_GENERATION_SKIP=true
 ENABLE_SUGGESTION_MODE_SKIP=true
 ENABLE_FILEPATH_EXTRACTION_MOCK=true
-```
+ENABLE_FAST_PREFIX_DETECTION=true
 
-### Web Tools
-```bash
+# Web Tools
 ENABLE_WEB_SERVER_TOOLS=true
 WEB_FETCH_ALLOWED_SCHEMES=http,https
 WEB_FETCH_ALLOW_PRIVATE_NETWORKS=false
-```
 
-### Provider Rate Limiting
-```bash
-PROVIDER_RATE_LIMIT=1
-PROVIDER_RATE_WINDOW=2
-PROVIDER_MAX_CONCURRENCY=2
-PROVIDER_PROGRESS_TIMEOUT=600.0
-```
-
-### HTTP Timeouts
-```bash
-HTTP_READ_TIMEOUT=120.0
-HTTP_WRITE_TIMEOUT=10.0
-HTTP_CONNECT_TIMEOUT=5.0
-```
-
-### Voice
-```bash
+# Voice
 VOICE_NOTE_ENABLED=true
 WHISPER_DEVICE=cpu          # cpu, cuda, nvidia_nim
 WHISPER_MODEL=base          # tiny, base, small, medium, large-v2, large-v3, large-v3-turbo
