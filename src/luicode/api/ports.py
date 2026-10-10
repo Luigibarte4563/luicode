@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from luicode.application.browser_agent.admin import BrowserAgentAdminService
+from luicode.application.browser_agent.service import BrowserAgentService
 from luicode.application.browser_tools.ports import BrowserToolsPort
 from luicode.application.code_sessions import CodeApplicationPort
 from luicode.application.connected_accounts import (
@@ -125,3 +127,5 @@ class ApiServices:
     web_tools: WebToolsPort
     browser_tools: BrowserToolsPort | None = None
     code: CodeApplicationPort | None = None
+    browser_agent: BrowserAgentService | None = None
+    browser_agent_admin: BrowserAgentAdminService | None = None

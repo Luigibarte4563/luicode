@@ -70,6 +70,11 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
         "Local Anthropic web_search and web_fetch behavior.",
     ),
     ConfigSectionSpec(
+        "browser_agent",
+        "Browser Agent",
+        "Jev Ultrafast browse_web tool, keys, and domain allowlist.",
+    ),
+    ConfigSectionSpec(
         "diagnostics",
         "Diagnostics",
         "Logging and debugging flags.",
@@ -464,6 +469,78 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "web_tools",
         "boolean",
         settings_attr="web_fetch_allow_private_networks",
+    ),
+    ConfigFieldSpec(
+        "JEV_ENABLED",
+        "Browser Agent Tool",
+        "browser_agent",
+        "boolean",
+        settings_attr="jev_enabled",
+        description=(
+            "Offer browse_web(url, goal) to models. Off by default; only the Browser "
+            "Agent Connect flow enables it."
+        ),
+    ),
+    ConfigFieldSpec(
+        "TYPESAFE_API_KEY",
+        "TypeSafe Key",
+        "browser_agent",
+        "secret",
+        settings_attr="typesafe_api_key",
+        secret=True,
+        description="Action-model key used by Jev Ultrafast.",
+    ),
+    ConfigFieldSpec(
+        "TEXT_MODEL_API_KEY",
+        "Text Model Key",
+        "browser_agent",
+        "secret",
+        settings_attr="text_model_api_key",
+        secret=True,
+        description="Key for the optional model that writes text into fields.",
+    ),
+    ConfigFieldSpec(
+        "JEV_TEXT_MODEL",
+        "Text Model",
+        "browser_agent",
+        "text",
+        settings_attr="jev_text_model",
+    ),
+    ConfigFieldSpec(
+        "JEV_ALLOWED_DOMAINS",
+        "Allowed Domains",
+        "browser_agent",
+        "text",
+        settings_attr="jev_allowed_domains",
+        description=(
+            "Comma-separated hostnames browse_web may visit. Empty means each new "
+            "domain needs approval in the Admin UI."
+        ),
+    ),
+    ConfigFieldSpec(
+        "JEV_MAX_STEPS",
+        "Max Steps Per Task",
+        "browser_agent",
+        "number",
+        settings_attr="jev_max_steps",
+    ),
+    ConfigFieldSpec(
+        "JEV_TIMEOUT_SECONDS",
+        "Task Timeout Seconds",
+        "browser_agent",
+        "number",
+        settings_attr="jev_timeout_seconds",
+    ),
+    ConfigFieldSpec(
+        "JEV_DEDICATED_PROFILE",
+        "Dedicated Chrome Profile",
+        "browser_agent",
+        "boolean",
+        settings_attr="jev_dedicated_profile",
+        description=(
+            "Run Jev in a separate Chrome profile so it cannot act inside your "
+            "logged-in sessions."
+        ),
     ),
     ConfigFieldSpec(
         "LOG_LEVEL",

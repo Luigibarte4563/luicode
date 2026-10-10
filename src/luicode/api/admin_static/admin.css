@@ -1232,3 +1232,64 @@ button.startup-busy, .startup-spinner { display: inline-flex; align-items: cente
 @media (prefers-reduced-motion: reduce) {
   button.startup-busy::before, .startup-spinner::before { animation: none; }
 }
+/* ==================== Browser Agent (Jev Ultrafast) ==================== */
+
+/* The two cards share one row. `auto-fit` (not the shared `.provider-grid`
+   `auto-fill`) collapses empty tracks so the cards fill the row instead of
+   sitting in narrow left-hand columns. Run history gets the wider track
+   because it carries a five-column table. Scoped to this tab so Providers
+   and Integrations keep their existing layout. */
+.browser-agent-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.jev-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 16px;
+  margin: 0 0 16px;
+}
+
+.jev-meta > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.jev-meta dt { color: var(--muted); font-size: 12px; }
+.jev-meta dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+
+.jev-notice {
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.35));
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.jev-notice p { margin: 6px 0 0; }
+
+.jev-change-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  display: grid;
+  gap: 4px;
+}
+
+.jev-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: 13px;
+}
+
+.jev-consent input { margin-top: 2px; }
+
+.provider-card-pill.error { color: var(--error); }
+
+@media (max-width: 900px) {
+  .browser-agent-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 400px) {
+  .jev-meta { grid-template-columns: 1fr; }
+}

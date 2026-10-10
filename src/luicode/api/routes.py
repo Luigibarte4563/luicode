@@ -73,6 +73,7 @@ async def _create_messages_response(
             request_headers=request_headers,
             model_info_lookup=lease.model_info,
             usage_sink=_usage_sink(services),
+            browser_agent=services.browser_agent,
         )
         response = await handler.create(request_data, request_id=request_id)
     except ApplicationError as exc:

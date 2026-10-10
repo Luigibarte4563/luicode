@@ -23,6 +23,8 @@ from luicode.api.response_streams import (
     terminal_execution_error_response,
     trace_terminal_execution_error,
 )
+from luicode.application.browser_agent.interception import BrowseWebInterceptor
+from luicode.application.browser_agent.service import BrowserAgentService
 from luicode.application.errors import ApplicationError
 from luicode.application.execution import ProviderExecutor, TokenCounter
 from luicode.application.ports import ModelInfoLookup, ProviderResolver
@@ -77,6 +79,7 @@ class MessagesHandler:
         request_headers: Mapping[str, str] | None = None,
         model_info_lookup: ModelInfoLookup | None = None,
         usage_sink: UsageSink | None = None,
+        browser_agent: BrowserAgentService | None = None,
     ) -> None:
         self._settings = settings
         self._model_router = model_router or ModelRouter(settings)
@@ -96,6 +99,15 @@ class MessagesHandler:
             executor=self._provider_executor,
             token_counter=token_counter,
         )
+        # Interception is optional: without a wired service the gateway behaves
+        # exactly as before and never offers browse_web (FR-13).
+        self._browser_agent = (
+            BrowseWebInterceptor(
+                service=browser_agent, executor=self._provider_executor
+            )
+            if browser_agent is not None
+            else None
+        )
 
     async def create(
         self, request_data: MessagesRequest, *, request_id: str | None = None
@@ -109,6 +121,12 @@ class MessagesHandler:
             tool_body = self._web_tools.try_stream_messages(
                 routed, request_id=request_id
             )
+            if tool_body is None and self._browser_agent is not None:
+                # Delegated browsing only applies to ordinary turns; a forced
+                # Anthropic web server tool keeps its existing handling.
+                tool_body = self._browser_agent.try_stream_messages(
+                    routed, request_id=request_id
+                )
             result = (
                 _MessagesStreamResult(tool_body)
                 if tool_body is not None

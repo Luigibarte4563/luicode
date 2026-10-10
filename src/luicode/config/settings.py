@@ -634,6 +634,36 @@ class Settings(BaseModel):
         default=False, validation_alias="WEB_FETCH_ALLOW_PRIVATE_NETWORKS"
     )
 
+    # ==================== Browser Agent (Jev Ultrafast browse_web) ====================
+    # Off by default; only the Admin Connect flow may enable it (SEC-1).
+    jev_enabled: bool = Field(default=False, validation_alias="JEV_ENABLED")
+    # Key for Jev's TypeSafe action model.
+    typesafe_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="TYPESAFE_API_KEY"
+    )
+    # Key for Jev's optional OpenAI-compatible text-writing helper.
+    text_model_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="TEXT_MODEL_API_KEY"
+    )
+    # Model used only when a field value must be written.
+    jev_text_model: NonEmptyString = Field(
+        default="inception/mercury-2.5", validation_alias="JEV_TEXT_MODEL"
+    )
+    # Comma-separated hostname allowlist; unset requires per-domain approval.
+    # None means "no allowlist configured", which is not the same as an empty
+    # string, so this uses the project's optional-secret idiom.
+    jev_allowed_domains: OptionalNonEmptyString = Field(
+        default=None, validation_alias="JEV_ALLOWED_DOMAINS"
+    )
+    # Per-task step cap applied by LUICODE, independent of Jev's own MAX_STEPS.
+    jev_max_steps: int = Field(default=30, validation_alias="JEV_MAX_STEPS")
+    # Per-task wall-clock cap.
+    jev_timeout_seconds: int = Field(default=60, validation_alias="JEV_TIMEOUT_SECONDS")
+    # Run Jev in a separate Chrome profile so it never touches logged-in sessions.
+    jev_dedicated_profile: bool = Field(
+        default=True, validation_alias="JEV_DEDICATED_PROFILE"
+    )
+
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
     # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).
     log_level: NonEmptyString = Field(default="INFO", validation_alias="LOG_LEVEL")
@@ -796,6 +826,47 @@ class Settings(BaseModel):
                     f"Invalid URL scheme in web_fetch_allowed_schemes: {scheme!r}"
                 )
         return ",".join(schemes)
+
+    @field_validator("jev_max_steps")
+    @classmethod
+    def validate_jev_max_steps(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("jev_max_steps must be > 0")
+        return v
+
+    @field_validator("jev_timeout_seconds")
+    @classmethod
+    def validate_jev_timeout_seconds(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("jev_timeout_seconds must be > 0")
+        return v
+
+    @field_validator("jev_allowed_domains")
+    @classmethod
+    def validate_jev_allowed_domains(cls, v: str | None) -> str | None:
+        """Accept literal hostnames only; wildcards and schemes are rejected."""
+        if v is None:
+            return None
+        domains: list[str] = []
+        for part in v.split(","):
+            entry = part.strip()
+            if not entry:
+                continue
+            if any(character in entry for character in ":/\\?#@*"):
+                raise ValueError(
+                    f"Invalid JEV_ALLOWED_DOMAINS entry {entry!r}: use a literal "
+                    "hostname without a scheme, port, path, or wildcard."
+                )
+            try:
+                domain = entry.encode("idna").decode("ascii").lower()
+            except UnicodeError as exc:
+                raise ValueError(
+                    f"Invalid JEV_ALLOWED_DOMAINS entry {entry!r}: not a hostname."
+                ) from exc
+            domains.append(domain)
+        if len(domains) != len(set(domains)):
+            raise ValueError("JEV_ALLOWED_DOMAINS must not contain duplicates.")
+        return ",".join(domains)
 
     @field_validator(
         "model", "model_fable", "model_opus", "model_sonnet", "model_haiku"

@@ -62,6 +62,7 @@ _ADMIN_ASSET_FILENAMES = frozenset(
         "model_combobox.js",
         "usage.css",
         "usage.js",
+        "browser_agent.js",
         *(
             f"providers/{provider.logo_filename}"
             for provider in PROVIDER_CATALOG.values()
@@ -126,6 +127,102 @@ async def admin_asset(version: str, filename: str, request: Request):
     if version != package_version() or filename not in _ADMIN_ASSET_FILENAMES:
         raise HTTPException(status_code=404, detail="Admin asset not found")
     return _asset_response(filename)
+
+
+@router.get("/admin/browser", include_in_schema=False)
+def admin_browser_page(request: Request):
+    require_loopback_admin(request)
+    return admin_page_response()
+
+
+class BrowserAgentConnectPayload(BaseModel):
+    """Keys and policy submitted by the Browser Agent Connect dialog."""
+
+    typesafe_api_key: str = Field(default="")
+    text_model_api_key: str = Field(default="")
+    allowed_domains: str = Field(default="")
+    confirm_data_processing: bool = Field(default=False)
+
+
+def _browser_agent(services: ApiServices):
+    """Return the browser-agent admin service, or 503 when it is not wired."""
+    service = services.browser_agent_admin
+    if service is None:
+        raise HTTPException(
+            status_code=503, detail="Browser agent is unavailable in this runtime."
+        )
+    return service
+
+
+@router.get("/admin/api/browser/jev/status")
+async def browser_agent_status(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    service = _browser_agent(services)
+    return _no_store(
+        {
+            **service.status(),
+            "chrome": await asyncio.to_thread(service.chrome_status),
+        }
+    )
+
+
+@router.post("/admin/api/browser/jev/connect")
+async def browser_agent_connect(
+    payload: BrowserAgentConnectPayload,
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    # Page state leaves the machine during a browse task, so the user must
+    # acknowledge it explicitly (SEC-2).
+    if not payload.confirm_data_processing:
+        return _no_store(
+            {
+                "ok": False,
+                "error": (
+                    "Confirm that page state is processed by TypeSafe and the "
+                    "text-model provider before connecting."
+                ),
+                "changed": [],
+            }
+        )
+    return _no_store(
+        await _browser_agent(services).connect(
+            typesafe_api_key=payload.typesafe_api_key,
+            text_model_api_key=payload.text_model_api_key,
+            allowed_domains=payload.allowed_domains,
+        )
+    )
+
+
+@router.post("/admin/api/browser/jev/disconnect")
+async def browser_agent_disconnect(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    return _no_store(await _browser_agent(services).disconnect())
+
+
+@router.post("/admin/api/browser/jev/stop")
+async def browser_agent_stop(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    return _no_store(_browser_agent(services).stop())
+
+
+@router.get("/admin/api/browser/jev/runs")
+async def browser_agent_runs(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+):
+    require_loopback_admin(request)
+    return _no_store(_browser_agent(services).runs())
 
 
 @router.get("/admin/api/config")
