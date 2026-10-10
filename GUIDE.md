@@ -30,6 +30,7 @@ The sidebar provides access to six views:
 | **Usage** | `/admin/usage` | Token usage, costs, optimization savings, provider health |
 | **Integrations** | `/admin/integrations` | Connect editors (VS Code, JetBrains, etc.) |
 | **Code Sessions** | `/admin/code` | Browse and manage code sessions |
+| **Browser Agent** | `/admin/browser` | Connect Jev Ultrafast and manage the `browse_web` tool |
 
 ---
 
@@ -77,6 +78,10 @@ Each section has **CONFIGURED** and **NOT CONFIGURED** subsections with counts.
 1. **Models** — Select which models luicode routes to; configure fallbacks
 2. **Reasoning** — Control reasoning effort, budgets, visibility
 3. **Web Tools** — Configure browsing, search, and code execution tools
+
+Web Tools here configures the built-in `web_search` / `web_fetch` server tools.
+The delegated `browse_web` browser tool is configured on its own
+[Browser Agent tab](#browser-agent-tab).
 
 ### Model Combobox
 
@@ -237,6 +242,65 @@ Browse, search, and manage code sessions:
 - **Search** — Filter by query, provider, model
 - **List** — Paginated session cards with metadata
 - **Actions** — View, resume, delete sessions
+
+---
+
+## Browser Agent Tab
+
+Connects [Jev Ultrafast](https://github.com/kitasota/jev-ultrafast) so your agent
+gets one `browse_web(url, goal)` tool instead of driving the browser step by step.
+
+The tab shows two cards side by side, collapsing to one column on narrow screens:
+
+1. **Jev Ultrafast card** — status pill, Chrome status, text model, allowed
+   domains, and the Connect / Disconnect / Stop buttons.
+2. **Recent browse tasks** — status, goal, start URL, steps, and elapsed time.
+   Goals are redacted by default.
+
+Below them, the **Browser Agent** settings section exposes the raw keys and caps.
+
+### Status pill
+
+| Pill | Meaning |
+|------|---------|
+| **Not connected** | Feature is off; the tool is never offered |
+| **Working** | Connect, disconnect, or a task is in progress |
+| **Connected** | Keys saved and Jev importable |
+| **Error** | The cause is shown on the card (missing key, not installed) |
+
+### Connect flow
+
+1. Click **Connect**. The dialog opens and lists **every file and setting that
+   will change** before anything is modified.
+2. Enter the **TypeSafe API key** (required), the **text-model key** (optional),
+   and an optional **domain allowlist**.
+3. Read the privacy notice and tick the confirmation box.
+4. Click **Connect**. Install failures and empty keys are reported in plain
+   language, and nothing is left half-configured.
+
+Keys are masked and never shown again after saving.
+
+### Settings
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `JEV_ENABLED` | `false` | Master switch for the `browse_web` tool |
+| `TYPESAFE_API_KEY` | empty | Key for Jev's action model |
+| `TEXT_MODEL_API_KEY` | empty | Key for the typing helper |
+| `JEV_TEXT_MODEL` | `inception/mercury-2.5` | Model used only when text must be written |
+| `JEV_ALLOWED_DOMAINS` | unset | Comma-separated allowlist |
+| `JEV_MAX_STEPS` | `30` | Step cap per task |
+| `JEV_TIMEOUT_SECONDS` | `60` | Time cap per task |
+| `JEV_DEDICATED_PROFILE` | `true` | Use a separate Chrome profile |
+
+### Privacy
+
+Page state leaves your machine during a browse task. Browsing is limited to the
+allowlist, only `http`/`https` is accepted, and private or loopback hosts are
+blocked unless explicitly allowlisted. **Disconnect** disables the feature and
+clears both keys; the package stays installed.
+
+**Not available on Android/Termux** (no embeddable Chromium).
 
 ---
 

@@ -45,6 +45,7 @@ luicode is a local gateway that lets your favorite coding agents run against one
 - **Voice notes in, code out.** Talk to your agent using local [Whisper](https://github.com/openai/whisper) or [NVIDIA NIM](https://docs.nvidia.com/nim/speech/latest/asr/deploy-asr-models/whisper.html) transcription.
 - **Agent capabilities stay intact.** Streaming, tool use, native interleaved thinking, and image input all keep working. You can also route [Fable](https://www.anthropic.com/claude/fable), [Opus](https://www.anthropic.com/claude/opus), [Sonnet](https://www.anthropic.com/claude/sonnet), and [Haiku](https://www.anthropic.com/claude/haiku) tiers independently to compatible models.
 - **Browser automation (optional).** Let agents navigate, click, fill forms, and extract data from web pages via Chrome DevTools Protocol, powered by the same engine as [JEV-Ultrafast](https://github.com/browser-use/jev-ultrafast).
+- **One-call web tasks (optional).** Connect Jev Ultrafast in the Admin UI and your agent gets a single `browse_web(url, goal)` tool: it delegates the whole task to a browser agent and continues the same turn with the result.
 
 ## How It Works
 
@@ -509,6 +510,70 @@ This installs `browser-harness` and `cdp-use`. You can also select the browser a
 </details>
 
 <details>
+<summary><strong>Browser Agent: one-call web tasks with Jev Ultrafast</strong></summary>
+
+Instead of driving the browser step by step, you can hand a whole web task to a
+browser agent. LUICode injects a single `browse_web(url, goal)` tool into the
+request; when the model calls it, the gateway runs
+[Jev Ultrafast](https://github.com/kitasota/jev-ultrafast) in a worker thread,
+returns the result to the model as a `tool_result`, and continues the same turn.
+
+**Setup (all in the Admin UI)**
+
+1. Open **Browser Agent** at `http://127.0.0.1:8082/admin/browser`.
+2. Click **Connect**. The dialog lists every file and setting that will change
+   before anything is written.
+3. Enter your **TypeSafe API key**, an optional **text-model key**, and an
+   optional **domain allowlist**, then confirm.
+
+There are no terminal steps: Connect installs Jev (from its git repository, since
+it is not published to PyPI), saves the keys to the managed environment, and
+enables the tool. **Disconnect** disables it and clears both keys.
+
+**Settings**
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `JEV_ENABLED` | `false` | Master switch for the `browse_web` tool |
+| `TYPESAFE_API_KEY` | empty | Key for Jev's action model |
+| `TEXT_MODEL_API_KEY` | empty | Key for the typing helper |
+| `JEV_TEXT_MODEL` | `inception/mercury-2.5` | Model used only when text must be written |
+| `JEV_ALLOWED_DOMAINS` | unset | Comma-separated allowlist |
+| `JEV_MAX_STEPS` | `30` | Step cap per task |
+| `JEV_TIMEOUT_SECONDS` | `60` | Time cap per task |
+| `JEV_DEDICATED_PROFILE` | `true` | Use a separate Chrome profile |
+
+**Privacy — please read this first**
+
+Jev drives a real Chrome profile and sends page state to an outside service.
+This feature is **off by default**, opt-in, and deliberately locked down:
+
+- Browsing is limited to an **allowlist**. With an empty list, each new domain
+  needs approval in the Admin UI.
+- Private and loopback addresses are blocked unless the host is explicitly
+  allowlisted, so `localhost` testing still works.
+- Only `http` and `https` URLs are accepted.
+- The Connect dialog states that page state is processed by TypeSafe and the
+  text-model provider, and requires confirmation. LUICODE's usual "all
+  processing local" claim **does not cover this feature**.
+- API keys are stored in the managed environment, masked in the UI, never
+  logged, and cleared on Disconnect.
+- Page text is wrapped as untrusted data so a page cannot issue instructions to
+  your agent.
+
+**Current limits**
+
+- Interception works for the **Anthropic Messages** protocol. OpenAI Responses
+  and Chat Completions are not covered yet.
+- No MCP server is exposed yet.
+- Run history appears on the Browser Agent tab, not in the Usage dashboard.
+- Requires the `browser` extra above, plus a TypeSafe key.
+
+> **Not available on Android/Termux** (no embeddable Chromium).
+
+</details>
+
+<details>
 <summary><strong>For developers</strong></summary>
 
 Browser automation is exposed through the `BrowserToolsPort` protocol in the application layer:
@@ -534,6 +599,12 @@ The runtime implementation (`BrowserToolsClient` in `luicode.runtime.browser_too
 - Staleness detection (page fingerprint guards)
 - Post-input observation (autocomplete suggestions, animations)
 - Screenshot capture (optional)
+
+The higher-level Browser Agent is a separate path. `BrowserWebInterceptor`
+(`luicode.application.browser_agent.interception`) injects the `browse_web` schema,
+detects the model's call, delegates to `JevBrowserAgent`, and re-enters the
+provider with a `tool_result`. Policy lives in `BrowserAgentService.check_url`,
+and every task is recorded for run history.
 
 </details>
 

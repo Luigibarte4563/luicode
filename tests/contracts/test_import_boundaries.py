@@ -40,6 +40,16 @@ IMPORT_EXCEPTIONS: dict[tuple[str, str], str] = {
         "Owner: installed server command. "
         "Reason: the command delegates construction to the process composition root."
     ),
+    (
+        "luicode.application.browser_agent.admin",
+        "luicode.runtime.browser_agent.jev",
+    ): (
+        "Owner: Browser Agent admin service. "
+        "Reason: the Admin card reports whether Jev is installed and at which "
+        "version, and that probe is owned by the runtime adapter. The import is "
+        "deferred into the two call sites so importing the application layer never "
+        "pulls in the blocking runner."
+    ),
 }
 
 FACADE_ONLY_BOUNDARIES = {
