@@ -55,6 +55,10 @@ class ManagedConfigSnapshot:
     path: Path
 
 
+class ManagedConfigConflictError(RuntimeError):
+    """Another writer changed the managed config after this update was prepared."""
+
+
 class ManagedConfigStore:
     """Own initialization and coordinate fresh reads with atomic writes."""
 
@@ -106,9 +110,29 @@ class ManagedConfigStore:
             self.path,
         )
 
-    def commit(self, values: Mapping[str, str]) -> None:
+    def commit(
+        self,
+        values: Mapping[str, str],
+        *,
+        expected_managed: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write managed config, refusing to overwrite a concurrent write.
+
+        ``expected_managed`` is the snapshot the caller prepared against. When
+        disk no longer matches it, another writer landed first and committing
+        would silently discard that writer's change, so the conflict is raised
+        instead. Passing ``None`` skips the check for callers that build the
+        whole file themselves.
+        """
+
         with self._storage_lock():
-            self._read_managed()  # Never overwrite a newer schema or missing storage.
+            # Never overwrite a newer schema or missing storage.
+            current = self._read_managed()
+            if expected_managed is not None and dict(current) != dict(expected_managed):
+                raise ManagedConfigConflictError(
+                    "Managed configuration changed after this update was prepared. "
+                    "Reload the Admin UI and apply the change again."
+                )
             atomic_write_managed_config(values, path=self.path)
 
     def repair_invalid_provider_proxies(

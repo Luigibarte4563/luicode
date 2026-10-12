@@ -1,6 +1,7 @@
 """Browser-agent workflow: policy, delegation, and run bookkeeping."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -39,15 +40,29 @@ class BrowseRunRecord:
     reason: str | None = None
 
 
+SettingsProvider = Callable[[], Settings]
+
+
 @dataclass
 class BrowserAgentService:
-    """Apply browse policy, delegate to Jev, and record every attempt."""
+    """Apply browse policy, delegate to Jev, and record every attempt.
+
+    Policy reads settings through ``settings_provider`` rather than holding a
+    snapshot, so an Admin change (an allowlist edit, for example) takes effect on
+    the next task instead of the next restart.
+    """
 
     port: BrowserAgentPort
-    settings: Settings
+    settings_provider: SettingsProvider
     _records: list[BrowseRunRecord] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _running: bool = False
+
+    @property
+    def settings(self) -> Settings:
+        """Return the settings the runtime currently serves requests with."""
+
+        return self.settings_provider()
 
     @property
     def enabled(self) -> bool:

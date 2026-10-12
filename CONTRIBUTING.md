@@ -79,7 +79,7 @@ Changes to runtime code, packaging, dependencies, or install/CI scripts require 
 
 Merging to `main` publishes to PyPI and GitHub Releases automatically. The workflow needs a PyPI trusted publisher, configured once per repository: owner `Luigibarte4563`, repository `luicode`, workflow `post-merge.yml`, environment `pypi`.
 
-Publication is not gated on the test suite. `Post merge` runs on the push to `main` itself, while the `CI` workflow runs on pull requests only, so a qualifying push publishes even though its tests never ran against `main`. The `pypi` environment exists to scope the trusted publisher's OIDC identity and currently has no protection rules, so it is an authentication environment rather than an approval gate.
+Publication runs the test suite on the pushed commit first. `Post merge` runs on the push to `main` itself, while the `CI` workflow runs on pull requests only, so a qualifying push would otherwise publish code whose tests never ran against `main`; the `verify` job closes that gap and `publish` needs it. The `pypi` environment exists to scope the trusted publisher's OIDC identity and currently has no protection rules, so it is an authentication environment rather than an approval gate.
 
 Users install published releases with `luicode-upgrade`, which resolves the newest release tag from the repository's releases feed. That feed is the source of truth for the upgrade path, so a release is only installable once its GitHub Release is public; drafts never appear.
 

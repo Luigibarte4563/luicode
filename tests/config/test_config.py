@@ -600,3 +600,31 @@ def test_settings_defaults_do_not_contain_empty_enum_strings() -> None:
     for _name, value in Settings():
         if isinstance(value, Enum):
             assert value.value
+
+
+def test_proxy_is_loopback_only_by_default() -> None:
+    """The proxy can spend provider credentials, so it must not face the network."""
+
+    settings = Settings()
+
+    assert settings.host == "127.0.0.1"
+    assert settings.proxy_auth_enabled is False
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "[::1]"])
+def test_loopback_hosts_need_no_proxy_authentication(host: str) -> None:
+    assert Settings(HOST=host).host == host
+
+
+def test_network_host_without_authentication_is_rejected() -> None:
+    with pytest.raises(ValidationError) as rejected:
+        Settings(HOST="0.0.0.0")
+
+    assert "PROXY_AUTH_ENABLED" in str(rejected.value)
+
+
+def test_network_host_is_allowed_with_proxy_authentication() -> None:
+    settings = Settings(HOST="0.0.0.0", PROXY_AUTH_ENABLED=True)
+
+    assert settings.host == "0.0.0.0"
+    assert settings.proxy_auth_enabled is True

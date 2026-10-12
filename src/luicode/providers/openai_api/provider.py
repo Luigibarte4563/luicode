@@ -4,7 +4,7 @@ import re
 from collections.abc import AsyncIterator, Mapping
 
 import httpx2
-from openai import APIError, APIStatusError, AsyncOpenAI, DefaultAsyncHttpx2Client
+from openai import APIError, APIStatusError, AsyncOpenAI
 
 from luicode.application.model_metadata import ProviderModelInfo
 from luicode.core.anthropic.models import MessagesRequest
@@ -21,6 +21,7 @@ from luicode.providers.admission import (
 from luicode.providers.base import BaseProvider, ProviderConfig
 from luicode.providers.model_listing import extract_openai_model_infos
 from luicode.providers.openai_responses import OpenAIResponsesTransport
+from luicode.providers.sdk_client import openai_http_client, provider_timeout
 
 
 def _sampling_retry_body(
@@ -73,23 +74,15 @@ class OpenAIAPIProvider(BaseProvider):
         super().__init__(config)
         if not config.api_key:
             raise ValueError("OpenAI API requires an API key")
-        timeout = httpx2.Timeout(
-            config.http_read_timeout,
-            connect=config.http_connect_timeout,
-            write=config.http_write_timeout,
-        )
-        if transport is not None:
-            http_client = httpx2.AsyncClient(transport=transport, timeout=timeout)
-        elif config.proxy:
-            http_client = DefaultAsyncHttpx2Client(proxy=config.proxy, timeout=timeout)
-        else:
-            http_client = None
+        timeout = provider_timeout(config)
         self._client = AsyncOpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
             max_retries=0,
             timeout=timeout,
-            http_client=http_client,
+            http_client=openai_http_client(
+                config, timeout=timeout, transport=transport
+            ),
         )
         self._admission = admission
         self._responses = OpenAIResponsesTransport(

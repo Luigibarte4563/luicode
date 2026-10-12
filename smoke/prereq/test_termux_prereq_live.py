@@ -275,8 +275,8 @@ Run these manually in a Termux environment after installation:
 - [ ] `pkg install` is not called again for packages already present
 
 ## 8. LAN Access (Optional)
-- [ ] Set LUICODE_HOST=0.0.0.0 in ~/.luicode/.env
-- [ ] Enable ANTHROPIC_AUTH_TOKEN
+- [ ] Set HOST=0.0.0.0, PROXY_AUTH_ENABLED=true, and ANTHROPIC_AUTH_TOKEN in
+      ~/.luicode/.env (a non-loopback HOST without authentication is refused)
 - [ ] Access Admin UI from another device on same LAN
 """
 

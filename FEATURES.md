@@ -412,11 +412,11 @@ All features degrade gracefully.
 ### Core Settings
 ```bash
 # Server
-HOST=0.0.0.0
+HOST=127.0.0.1
 PORT=8082
 LUICODE_OPEN_BROWSER=true
 
-# Proxy Auth
+# Proxy Auth (required, with HOST set to a non-loopback address)
 PROXY_AUTH_ENABLED=false
 ANTHROPIC_AUTH_TOKEN=luicode
 

@@ -1,5 +1,6 @@
 """Pure, validated application settings schema."""
 
+import ipaddress
 from typing import Annotated
 
 from pydantic import (
@@ -26,6 +27,18 @@ def _empty_to_none(value: object) -> object:
     if isinstance(value, str) and not value.strip():
         return None
     return value
+
+
+def is_loopback_bind_host(host: str) -> bool:
+    """Return whether binding this host keeps the proxy on this machine only."""
+
+    normalized = host.strip().strip("[]").casefold()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 NonEmptyString = Annotated[
@@ -743,7 +756,10 @@ class Settings(BaseModel):
     )
 
     # ==================== Server ====================
-    host: NonEmptyString = Field(default="0.0.0.0", validation_alias="HOST")
+    # Loopback by default: this proxy can spend the configured provider
+    # credentials, so it must stay unreachable from the network unless the
+    # operator opts in explicitly.
+    host: NonEmptyString = Field(default="127.0.0.1", validation_alias="HOST")
     port: int = Field(default=8082, validation_alias="PORT")
     open_admin_browser: bool = Field(
         default=True, validation_alias="LUICODE_OPEN_BROWSER"
@@ -888,6 +904,18 @@ class Settings(BaseModel):
         if len(validated) != len(set(validated)):
             raise ValueError("MODEL_FALLBACKS must not contain duplicate model refs.")
         return validated
+
+    @model_validator(mode="after")
+    def check_network_exposure(self) -> Settings:
+        """Refuse an unauthenticated proxy that the network can reach."""
+
+        if not is_loopback_bind_host(self.host) and not self.proxy_auth_enabled:
+            raise ValueError(
+                f"HOST={self.host} exposes the provider proxy to your network while "
+                "PROXY_AUTH_ENABLED is false. Set PROXY_AUTH_ENABLED=true and "
+                "ANTHROPIC_AUTH_TOKEN to a shared secret, or bind HOST=127.0.0.1."
+            )
+        return self
 
     @model_validator(mode="after")
     def check_nvidia_nim_api_key(self) -> Settings:

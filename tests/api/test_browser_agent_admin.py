@@ -4,22 +4,63 @@ Covers FR-4, FR-6, FR-9, FR-10 and SEC-2/SEC-9 without running a real install:
 the installer is stubbed so the suite stays free and deterministic.
 """
 
+from collections.abc import Mapping
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from luicode.api.admin_routes import router as admin_router
+from luicode.api.admin_security import require_loopback_admin
 from luicode.application.browser_agent.admin import BrowserAgentAdminService
 from luicode.application.browser_agent.service import BrowserAgentService
+from luicode.config.admin.state import ConfigInputValue
 from luicode.config.env_migrations import CONFIG_SCHEMA_VERSION
 from luicode.config.loader import ManagedConfigStore
 from luicode.config.settings import Settings
+from luicode.core.json_types import JsonObject
+from luicode.runtime.configuration import ConfigurationService
 from tests.browser_agent_support import RecordingBrowserAgent
 
 
-def _local_client(app):
+class _ConfigWriter:
+    """Faithful stand-in for the runtime's single managed-config writer.
+
+    Uses the same ``ConfigurationService`` the runtime uses, and adopts the new
+    settings on success exactly as the runtime's provider-generation swap does.
+    """
+
+    def __init__(self, store: ManagedConfigStore) -> None:
+        self._configuration = ConfigurationService(store)
+        self._settings = store.read().settings
+        self.fail_with: Exception | None = None
+
+    def current_settings(self) -> Settings:
+        return self._settings
+
+    async def apply_config_values(
+        self, updates: Mapping[str, ConfigInputValue]
+    ) -> JsonObject:
+        if self.fail_with is not None:
+            raise self.fail_with
+        prepared = await self._configuration.prepare(updates, self._settings)
+        if not prepared.valid:
+            return prepared.applied_response()
+        result = await self._configuration.commit(prepared)
+        assert prepared.settings is not None
+        self._settings = prepared.settings
+        return result
+
+
+class _AdminClient(TestClient):
+    """Admin client that also exposes the writer for conflict assertions."""
+
+    writer: _ConfigWriter
+
+
+def _local_client(app) -> _AdminClient:
     """Admin client bound to loopback, matching the Admin security boundary."""
-    return TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
+    return _AdminClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
 
 @pytest.fixture
@@ -32,15 +73,18 @@ def client(monkeypatch, tmp_path):
     store = ManagedConfigStore()
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text(
-        f"LUICODE_CONFIG_SCHEMA={CONFIG_SCHEMA_VERSION}\nMODEL=nvidia_nim/test-model\n",
+        f"LUICODE_CONFIG_SCHEMA={CONFIG_SCHEMA_VERSION}\n"
+        "MODEL=nvidia_nim/test-model\n"
+        "JEV_ALLOWED_DOMAINS=example.com\n",
         encoding="utf-8",
     )
 
-    settings = Settings.model_validate(
-        {"MODEL": "nvidia_nim/test-model", "JEV_ALLOWED_DOMAINS": "example.com"}
+    writer = _ConfigWriter(store)
+    service = BrowserAgentService(
+        port=RecordingBrowserAgent(),
+        settings_provider=writer.current_settings,
     )
-    service = BrowserAgentService(port=RecordingBrowserAgent(), settings=settings)
-    admin = BrowserAgentAdminService(store=store, service=service)
+    admin = BrowserAgentAdminService(service=service, writer=writer)
 
     class _Admin:
         """The admin port itself is unused by these routes."""
@@ -59,7 +103,9 @@ def client(monkeypatch, tmp_path):
     from luicode.api.dependencies import get_services
 
     app.dependency_overrides[get_services] = lambda: _Services()
-    return _local_client(app)
+    client = _local_client(app)
+    client.writer = writer
+    return client
 
 
 def test_status_reports_not_connected_by_default(client):
@@ -206,6 +252,76 @@ def test_stop_reports_whether_a_task_was_cancelled(client):
     assert response.json()["ok"] is True
 
 
+def test_connect_and_disconnect_are_visible_in_status_without_a_restart(
+    client, monkeypatch
+):
+    """Regression: status used to read a startup snapshot and never update."""
+    from luicode.application.browser_agent import admin as admin_module
+    from luicode.application.browser_agent.admin import JevInstallResult
+
+    async def _ok():
+        return JevInstallResult(ok=True, message="installed")
+
+    monkeypatch.setattr(admin_module, "install_jev", _ok)
+    monkeypatch.setattr("luicode.runtime.browser_agent.jev.jev_available", lambda: True)
+    monkeypatch.setattr("luicode.runtime.browser_agent.jev.jev_version", lambda: "0")
+
+    before = client.get("/admin/api/browser/jev/status").json()
+    assert before["state"] == "not_connected"
+    assert before["has_typesafe_key"] is False
+
+    client.post(
+        "/admin/api/browser/jev/connect",
+        json={
+            "typesafe_api_key": "ts-secret",
+            "allowed_domains": "other.test",
+            "confirm_data_processing": True,
+        },
+    )
+
+    after_connect = client.get("/admin/api/browser/jev/status").json()
+    assert after_connect["state"] == "connected"
+    assert after_connect["allowed_domains"] == ["other.test"]
+    assert after_connect["has_typesafe_key"] is True
+
+    client.post("/admin/api/browser/jev/disconnect")
+
+    after_disconnect = client.get("/admin/api/browser/jev/status").json()
+    assert after_disconnect["state"] == "not_connected"
+    assert after_disconnect["has_typesafe_key"] is False
+
+
+def test_connect_reports_a_config_conflict_without_claiming_success(
+    client, monkeypatch
+):
+    """A concurrent writer must surface as a failure, not a silent overwrite."""
+    from luicode.application.browser_agent import admin as admin_module
+    from luicode.application.browser_agent.admin import JevInstallResult
+    from luicode.application.errors import ConfigConflictError
+
+    async def _ok():
+        return JevInstallResult(ok=True, message="installed")
+
+    monkeypatch.setattr(admin_module, "install_jev", _ok)
+    client.writer.fail_with = ConfigConflictError(
+        "Managed configuration changed after this update was prepared."
+    )
+
+    response = client.post(
+        "/admin/api/browser/jev/connect",
+        json={
+            "typesafe_api_key": "ts-secret",
+            "confirm_data_processing": True,
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["ok"] is False
+    assert body["changed"] == []
+    assert "changed after this update was prepared" in body["error"]
+
+
 def test_runs_history_redacts_goals(client):
     """FR-27: run history does not expose goals by default."""
     response = client.get("/admin/api/browser/jev/runs")
@@ -214,16 +330,24 @@ def test_runs_history_redacts_goals(client):
     assert response.json()["runs"] == []
 
 
-def test_browser_agent_routes_are_loopback_only():
-    """SEC-9: the routes inherit the loopback guard, like every admin route."""
-    guarded = [
-        route
-        for route in admin_router.routes
-        if getattr(route, "path", "").startswith("/admin/api/browser/jev/")
-    ]
-    assert guarded, "browser agent routes are missing"
-    # The guard is applied inside each handler via require_loopback_admin, and the
-    # page route is registered alongside the other admin pages.
+def test_admin_router_declares_the_loopback_guard_for_every_route():
+    """SEC-9: the guard is a router dependency, so no endpoint can omit it."""
+
+    declared = {dependency.dependency for dependency in admin_router.dependencies}
+
+    assert require_loopback_admin in declared
     assert any(
         getattr(route, "path", "") == "/admin/browser" for route in admin_router.routes
     )
+
+
+def test_browser_agent_routes_reject_a_non_loopback_client(client):
+    """SEC-9: an off-machine caller is refused before any work happens."""
+
+    remote = _AdminClient(
+        client.app, base_url="http://10.0.0.5", client=("10.0.0.5", 50000)
+    )
+
+    response = remote.get("/admin/api/browser/jev/status")
+
+    assert response.status_code == 403

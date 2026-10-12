@@ -221,11 +221,11 @@ async def test_worker_commit_retains_ownership_against_queued_apply(
     original = store.commit
     writes = []
 
-    def blocked_commit(values):
+    def blocked_commit(values, *, expected_managed=None):
         entered.set()
         assert release.wait(5)
         writes.append(values["LOG_LEVEL"])
-        original(values)
+        original(values, expected_managed=expected_managed)
 
     async def wait_for_commit():
         while not entered.is_set():

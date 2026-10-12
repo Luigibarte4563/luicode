@@ -12,7 +12,7 @@ from luicode.providers.admission import (
     ProviderOperationKind,
 )
 from luicode.providers.endpoint import RequestEndpoint
-from luicode.providers.history_replay import history_retry_body
+from luicode.providers.history_corrections import history_retry_body
 from luicode.providers.reasoning_compatibility import ReasoningCorrection
 from luicode.providers.stream_recovery import RecoveryController
 

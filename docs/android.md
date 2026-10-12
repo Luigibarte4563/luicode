@@ -68,9 +68,13 @@ luicode-server
 ```
 
 The server prints the Admin UI URL. With the default settings that is
-<http://127.0.0.1:8082/admin> (built-in defaults: `HOST=0.0.0.0`, `PORT=8082`).
+<http://127.0.0.1:8082/admin> (built-in defaults: `HOST=127.0.0.1`, `PORT=8082`).
 Set `PORT` in `~/.luicode/.env` to change it, and the installer will report the
 resulting URL on the next run.
+
+The proxy listens on loopback only, because it can spend the provider
+credentials you configured. Serving it to your network is opt-in and requires
+authentication; see [From another device on the same LAN](#from-another-device-on-the-same-lan).
 
 ### Keeping the Server Alive (Background)
 
@@ -123,18 +127,22 @@ termux-open-url http://127.0.0.1:8082/admin
 
 ### From another device on the same LAN
 
-To configure luicode from a laptop while the phone runs the server:
+To configure luicode from a laptop while the phone runs the server, you must opt
+in to network access **and** authentication. `luicode-server` refuses to start
+with a non-loopback `HOST` while `PROXY_AUTH_ENABLED` is false, because anyone
+who can reach the port could otherwise spend your provider credentials.
 
-1. Bind to all interfaces (add to `~/.luicode/.env`):
+1. Bind to all interfaces and require the shared token (add to `~/.luicode/.env`):
    ```env
-   LUICODE_HOST=0.0.0.0
-   ```
-
-2. **Security warning**: This exposes the Admin UI and API to your LAN. **Enable Proxy Authentication**:
-   ```env
+   HOST=0.0.0.0
+   PROXY_AUTH_ENABLED=true
    ANTHROPIC_AUTH_TOKEN=your-secure-random-token
    ```
-   Then configure clients to send `Authorization: Bearer your-secure-random-token`.
+
+2. **Security warning**: this exposes the API to your LAN. Anyone holding the
+   token can spend your provider credentials. The `luicode-*` launchers send
+   `Authorization: Bearer your-secure-random-token` automatically once Proxy
+   Authentication is enabled; other clients must send it themselves.
 
 3. Find your phone's LAN IP (e.g., `192.168.1.42`) and access `http://192.168.1.42:8082` from the other device.
 
@@ -244,10 +252,10 @@ Then remove the managed block from `~/.bashrc` or `~/.zshrc`:
   instead of discarding your edits.
 
 ### Network access from LAN not working
-- Verify `LUICODE_HOST=0.0.0.0` is set
+- Verify `HOST=0.0.0.0`, `PROXY_AUTH_ENABLED=true`, and `ANTHROPIC_AUTH_TOKEN`
+  are all set; a non-loopback `HOST` without Proxy Authentication is refused
 - Check Android firewall / VPN settings
 - Ensure both devices are on the same network (not guest/isolation mode)
-- Enable `ANTHROPIC_AUTH_TOKEN` for security
 
 ## Acceptance Criteria Checklist
 

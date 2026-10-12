@@ -24,19 +24,24 @@ def test_post_merge_serializes_and_limits_publish_permissions():
         "cancel-in-progress": False,
         "queue": "max",
     }
-    assert len(config["jobs"]) == 2
+    assert set(config["jobs"]) == {"warm-dependency-cache", "verify", "publish"}
     cache = config["jobs"]["warm-dependency-cache"]
+    verify = config["jobs"]["verify"]
     assert {e["os"] for e in cache["strategy"]["matrix"]["include"]} == {
         "Linux",
         "Windows",
         "macOS",
     }
     publish = config["jobs"]["publish"]
-    assert "needs" not in publish
+    # Publication waits for the suite: CI itself runs on pull requests only.
+    assert publish["needs"] == "verify"
     assert publish["environment"] == "pypi"
     assert publish["permissions"] == {"contents": "write", "id-token": "write"}
     assert cache["permissions"] == {"contents": "read"}
-    for job in (cache, publish):
+    assert verify["permissions"] == {"contents": "read"}
+    suite = next(s for s in verify["steps"] if s.get("name") == "Run tests")
+    assert "pytest" in suite["run"]
+    for job in (cache, verify, publish):
         assert job["if"] == "github.ref == 'refs/heads/main'"
         checkout = next(
             s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout@")

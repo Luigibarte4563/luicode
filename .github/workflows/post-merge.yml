@@ -1,8 +1,9 @@
 # Publication is automatic. Any push to main whose commit subject starts with
 # patch:, minor: or major: and touches a release path publishes to PyPI and
 # GitHub Releases without further review.
-# This is independent of the CI workflow, which runs on pull_request only, so
-# a release is never gated on the test suite.
+# The CI workflow runs on pull_request only, so this workflow runs the suite on
+# the pushed commit itself and the publish job waits for it: a qualifying push
+# cannot publish untested code.
 # The `pypi` environment below scopes the trusted publisher's OIDC identity. It
 # carries no protection rules, so it is an authentication environment and not an
 # approval gate; see CONTRIBUTING.md for adding required reviewers.
@@ -87,8 +88,32 @@ jobs:
           path: ${{ steps.environment.outputs.dependencies-path }}
           key: ${{ steps.environment.outputs.dependencies-key }}
 
+  verify:
+    name: Verify the released commit
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Set up CI environment
+        uses: ./.github/actions/ci-environment
+        with:
+          uv-version: ${{ env.CI_UV_VERSION }}
+          runner-label: ubuntu-latest
+          prepare-node: "true"
+
+      - name: Run tests
+        run: uv run --locked pytest -q --tb=short
+
   publish:
     name: Publish to PyPI
+    needs: verify
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15

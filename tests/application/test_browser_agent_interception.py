@@ -175,7 +175,9 @@ async def _collect(body) -> str:
 @pytest.mark.asyncio
 async def test_disabled_feature_is_not_intercepted():
     port = RecordingBrowserAgent()
-    service = BrowserAgentService(port=port, settings=_settings(JEV_ENABLED="false"))
+    service = BrowserAgentService(
+        port=port, settings_provider=lambda: _settings(JEV_ENABLED="false")
+    )
     interceptor = BrowseWebInterceptor(
         service=service,
         executor=ProviderExecutor(_unused_resolver(), progress_timeout_seconds=5),
@@ -188,7 +190,7 @@ async def test_disabled_feature_is_not_intercepted():
 async def test_forced_tool_choice_is_left_alone():
     """FR-20: an explicit forced tool_choice is never overridden."""
     port = RecordingBrowserAgent()
-    service = BrowserAgentService(port=port, settings=_settings())
+    service = BrowserAgentService(port=port, settings_provider=lambda: _settings())
     interceptor = BrowseWebInterceptor(
         service=service,
         executor=ProviderExecutor(_unused_resolver(), progress_timeout_seconds=5),
@@ -201,7 +203,7 @@ async def test_forced_tool_choice_is_left_alone():
 @pytest.mark.asyncio
 async def test_existing_browse_web_tool_is_not_duplicated():
     port = RecordingBrowserAgent()
-    service = BrowserAgentService(port=port, settings=_settings())
+    service = BrowserAgentService(port=port, settings_provider=lambda: _settings())
     interceptor = BrowseWebInterceptor(
         service=service,
         executor=ProviderExecutor(_unused_resolver(), progress_timeout_seconds=5),
@@ -218,7 +220,7 @@ async def test_existing_browse_web_tool_is_not_duplicated():
 async def test_browse_call_is_answered_and_the_turn_continues():
     """AC-5: the gateway runs the task and continues the same turn."""
     port = RecordingBrowserAgent()
-    service = BrowserAgentService(port=port, settings=_settings())
+    service = BrowserAgentService(port=port, settings_provider=lambda: _settings())
     calls: list[list[Tool]] = []
 
     def stream_messages(_request, **kwargs):
@@ -253,7 +255,7 @@ async def test_browse_call_is_answered_and_the_turn_continues():
 @pytest.mark.asyncio
 async def test_continuation_carries_the_tool_result_back_to_the_model():
     port = RecordingBrowserAgent()
-    service = BrowserAgentService(port=port, settings=_settings())
+    service = BrowserAgentService(port=port, settings_provider=lambda: _settings())
     seen: list[list] = []
 
     def stream_messages(_request, **kwargs):
@@ -284,7 +286,7 @@ async def test_continuation_carries_the_tool_result_back_to_the_model():
 async def test_blocked_domain_is_reported_as_a_tool_result_not_a_crash():
     """AC-6: the model receives a blocked result instead of a failure."""
     port = RecordingBrowserAgent()
-    service = BrowserAgentService(port=port, settings=_settings())
+    service = BrowserAgentService(port=port, settings_provider=lambda: _settings())
     calls: list[list[Message]] = []
 
     def stream_messages(_request, **kwargs):
@@ -314,7 +316,7 @@ async def test_blocked_domain_is_reported_as_a_tool_result_not_a_crash():
 @pytest.mark.asyncio
 async def test_turn_without_browse_call_is_passed_through_once():
     port = RecordingBrowserAgent()
-    service = BrowserAgentService(port=port, settings=_settings())
+    service = BrowserAgentService(port=port, settings_provider=lambda: _settings())
     calls: list[int] = []
 
     def stream_messages(_request, **kwargs):

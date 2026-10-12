@@ -56,7 +56,7 @@ from luicode.providers.failure_policy import (
     is_context_window_finish_reason,
     is_retryable_stream_error,
 )
-from luicode.providers.history_replay import (
+from luicode.providers.history_corrections import (
     replay_origin,
     validate_history,
 )

@@ -53,7 +53,7 @@ from luicode.providers.failure_policy import (
     provider_authentication_status,
     reports_context_window_incomplete,
 )
-from luicode.providers.history_replay import (
+from luicode.providers.history_corrections import (
     replay_origin,
     validate_history,
 )

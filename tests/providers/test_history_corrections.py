@@ -7,7 +7,7 @@ import pytest
 from openai import BadRequestError
 
 from luicode.providers.endpoint_types import HttpEndpoint
-from luicode.providers.history_replay import history_retry_body, replay_origin
+from luicode.providers.history_corrections import history_retry_body, replay_origin
 
 
 def _error(message, *, code="invalid_request_error", param=None, status=400):

@@ -17,6 +17,12 @@ from e2e.code_support import CodeControl
 from e2e.usage_support import UsageControl
 from luicode.api.app import create_app
 from luicode.api.ports import ApiServices
+from luicode.application.browser_agent.admin import (
+    BrowserAgentAdminService,
+    JevInstallResult,
+)
+from luicode.application.browser_agent.ports import BrowseTask
+from luicode.application.browser_agent.service import BrowserAgentService
 from luicode.application.model_metadata import ProviderModelInfo
 from luicode.config import env_migrations, paths
 from luicode.config.env_migrations import recognized_env_keys
@@ -27,6 +33,7 @@ from luicode.config.loader import (
 )
 from luicode.config.settings import Settings
 from luicode.core.anthropic.models import MessagesRequest
+from luicode.core.browser_agent import BrowseRunResult
 from luicode.core.openai_responses import OpenAIResponsesRequest
 from luicode.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
 from luicode.harnesses import (
@@ -139,6 +146,18 @@ class _ModelListingProvider(BaseProvider):
     ) -> AsyncIterator[str]:
         if False:
             yield ""
+
+
+class _UnusedBrowserAgentPort:
+    """The Admin UI flow never browses; a task here is a test failure."""
+
+    async def run(
+        self, task: BrowseTask, *, cancel_token: object | None = None
+    ) -> BrowseRunResult:
+        raise AssertionError("Browser-agent tests must not run a browse task")
+
+    def cancel_running(self) -> bool:
+        return False
 
 
 @pytest.fixture
@@ -282,6 +301,29 @@ def admin_base_url(
         code_service=code_control.service,
     )
     usage_control = UsageControl(runtime)
+
+    browser_agent_service = BrowserAgentService(
+        port=_UnusedBrowserAgentPort(),
+        settings_provider=manager.current_settings,
+    )
+
+    async def installed_jev() -> JevInstallResult:
+        return JevInstallResult(ok=True, message="stub install")
+
+    # The real installer reaches the network, and the probes inspect the local
+    # environment; the Admin card flow under test owns neither.
+    monkeypatch.setattr(
+        "luicode.application.browser_agent.admin.install_jev", installed_jev
+    )
+    monkeypatch.setattr("luicode.runtime.browser_agent.jev.jev_available", lambda: True)
+    monkeypatch.setattr(
+        "luicode.runtime.browser_agent.jev.jev_version", lambda: "0.0.0-e2e"
+    )
+    monkeypatch.setattr(
+        BrowserAgentAdminService,
+        "chrome_status",
+        lambda _service: {"available": False, "detail": "Chrome is stubbed"},
+    )
     monkeypatch.setattr(
         NativeFolderPicker,
         "_select",
@@ -295,6 +337,11 @@ def admin_base_url(
                 tasks=runtime,
                 web_tools=StubWebToolsClient(),
                 code=code_control.service,
+                browser_agent=browser_agent_service,
+                browser_agent_admin=BrowserAgentAdminService(
+                    service=browser_agent_service,
+                    writer=runtime,
+                ),
             )
         ),
         runtime,

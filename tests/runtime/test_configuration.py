@@ -6,11 +6,12 @@ from unittest.mock import patch
 
 import pytest
 
+from luicode.application.errors import ConfigConflictError
 from luicode.config import loader
 from luicode.config.admin.persistence import prepare_admin_update
 from luicode.config.env_files import LUICODE_CONFIG_SCHEMA_ENV
 from luicode.config.env_migrations import CONFIG_SCHEMA_VERSION
-from luicode.config.loader import ManagedConfigStore
+from luicode.config.loader import ManagedConfigConflictError, ManagedConfigStore
 from luicode.config.paths import config_lock_path
 from luicode.core.interprocess_lock import InterprocessFileLock
 from luicode.runtime.configuration import ConfigurationService
@@ -49,6 +50,57 @@ def test_preparation_uses_captured_disk_and_process_state(monkeypatch):
     assert prepared.settings is not None
     assert prepared.settings.port == 8123
     assert "PORT" not in prepared.target_values
+
+
+def test_commit_refuses_to_overwrite_a_write_that_landed_first():
+    """A prepared update must not clobber a change written after it was read."""
+
+    store = ManagedConfigStore()
+    store.initialize()
+    snapshot = store.read()
+    prepared = prepare_admin_update({"PORT": "8124"}, snapshot, snapshot.settings)
+    assert prepared.valid
+
+    # Another writer (an Admin Apply, or a second process) lands first.
+    store.commit(dict(snapshot.managed) | {"PORT": "8125"})
+
+    with pytest.raises(ManagedConfigConflictError, match="changed"):
+        store.commit(
+            prepared.target_values,
+            expected_managed=prepared.expected_managed,
+        )
+
+    assert store.read().managed["PORT"] == "8125"
+
+
+def test_commit_with_a_matching_before_image_succeeds():
+    store = ManagedConfigStore()
+    store.initialize()
+    snapshot = store.read()
+    prepared = prepare_admin_update({"PORT": "8126"}, snapshot, snapshot.settings)
+
+    store.commit(prepared.target_values, expected_managed=prepared.expected_managed)
+
+    assert store.read().managed["PORT"] == "8126"
+
+
+@pytest.mark.asyncio
+async def test_configuration_service_reports_a_conflict_as_an_application_error():
+    """The API needs a deterministic status code, not a raw runtime error."""
+
+    store = ManagedConfigStore()
+    store.initialize()
+    configuration = ConfigurationService(store)
+    active = store.read().settings
+    prepared = await configuration.prepare({"PORT": "8127"}, active)
+
+    store.commit(dict(store.read().managed) | {"PORT": "8128"})
+
+    with pytest.raises(ConfigConflictError) as conflict:
+        await configuration.commit(prepared)
+
+    assert conflict.value.status_code == 409
+    assert store.read().managed["PORT"] == "8128"
 
 
 @pytest.mark.asyncio

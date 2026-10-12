@@ -9,9 +9,12 @@ from luicode.api.app import create_app
 from luicode.api.ports import ApiServices
 from luicode.application.browser_agent.admin import BrowserAgentAdminService
 from luicode.application.browser_agent.ports import BrowseTask
-from luicode.application.browser_agent.service import BrowserAgentService
+from luicode.application.browser_agent.service import (
+    BrowserAgentService,
+    SettingsProvider,
+)
 from luicode.application.code_sessions import CodeService
-from luicode.config.loader import ManagedConfigStore, get_settings
+from luicode.config.loader import ManagedConfigStore
 from luicode.config.logging_config import configure_logging
 from luicode.config.paths import (
     code_database_path,
@@ -113,10 +116,11 @@ def build_asgi_app(
         )
 
     # Browser agent (Jev Ultrafast). Off by default; Connect in the Admin UI
-    # enables it. Keys are read per task so Apply takes effect without a restart.
+    # enables it. Policy and keys are read per task from the live provider
+    # generation, so Apply or Connect takes effect without a restart.
     browser_agent_service = BrowserAgentService(
-        port=_JevAgentProxy(),
-        settings=settings,
+        port=_JevAgentProxy(settings_provider=provider_manager.current_settings),
+        settings_provider=provider_manager.current_settings,
     )
 
     services = ApiServices(
@@ -128,8 +132,8 @@ def build_asgi_app(
         code=code_service,
         browser_agent=browser_agent_service,
         browser_agent_admin=BrowserAgentAdminService(
-            store=ManagedConfigStore(),
             service=browser_agent_service,
+            writer=runtime,
         ),
     )
     return RuntimeASGIApp(create_app(services), runtime)
@@ -143,11 +147,12 @@ class _JevAgentProxy:
     runner is retained so the Admin Stop button can cancel it (SEC-10).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, settings_provider: SettingsProvider) -> None:
+        self._settings_provider = settings_provider
         self._active: JevBrowserAgent | None = None
 
     async def run(self, task: BrowseTask, *, cancel_token: object | None = None):
-        settings = get_settings()
+        settings = self._settings_provider()
         runner = JevBrowserAgent(
             typesafe_api_key=settings.typesafe_api_key,
             text_model_api_key=settings.text_model_api_key,

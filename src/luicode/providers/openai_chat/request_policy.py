@@ -19,7 +19,7 @@ from luicode.core.openai_tool_names import (
     encode_openai_chat_tool_names,
 )
 from luicode.core.reasoning import ReasoningPolicy
-from luicode.providers.history_replay import validate_history
+from luicode.providers.history_corrections import validate_history
 
 MaxTokensField = Literal["max_tokens", "max_completion_tokens"]
 OpenAIChatPostprocessor = Callable[

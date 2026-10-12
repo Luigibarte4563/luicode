@@ -10,9 +10,9 @@ import traceback
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from functools import partial
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
@@ -44,7 +44,6 @@ from luicode.config.admin.status import provider_config_status
 from luicode.config.loader import clear_settings_cache
 from luicode.config.model_refs import parse_provider_type
 from luicode.config.paths import (
-    claude_desktop_disconnect_path,
     codex_model_catalog_path,
     messaging_state_dir_path,
 )
@@ -52,10 +51,7 @@ from luicode.config.server_urls import local_admin_url, local_proxy_root_url
 from luicode.config.settings import Settings
 from luicode.core.json_types import JsonObject
 from luicode.harnesses import (
-    claude_desktop_integration,
-    claude_integration,
     codex_integration,
-    jetbrains_acp_integration,
 )
 from luicode.messaging.platforms import factory as messaging_platform_factory
 from luicode.messaging.platforms.factory import MessagingPlatformOptions
@@ -79,11 +75,18 @@ from luicode.core.async_tasks import run_sync_owned
 
 from .configuration import ConfigurationService
 from .folder_picker import NativeFolderPicker
+from .integrations import (
+    DESKTOP_OPERATIONS,
+    JETBRAINS_OPERATIONS,
+    VSCODE_OPERATIONS,
+    IntegrationAction,
+    IntegrationOperations,
+    IntegrationUpdate,
+)
 from .provider_manager import ProviderRuntimeManager
 from .retired_chat import remove_retired_chat_history
 
 RestartCallback = Callable[[], None]
-IntegrationAction = Literal["status", "connect", "disconnect", "refresh"]
 
 
 async def _close_usage_database() -> None:
@@ -94,22 +97,6 @@ async def _close_usage_database() -> None:
     from luicode.runtime.usage_sqlite import close_usage_database
 
     await close_usage_database()
-
-
-@dataclass
-class _IntegrationUpdate:
-    state: Literal["starting", "ready", "failed"] = "ready"
-    changed: bool = False
-    message: str | None = None
-    task: asyncio.Task[None] | None = None
-
-    def snapshot(self) -> JsonObject:
-        return {"state": self.state, "changed": self.changed, "message": self.message}
-
-    def complete(self, changed: bool = False) -> None:
-        self.state = "ready"
-        self.changed = changed
-        self.message = None
 
 
 _PROVIDER_CHECK_FAILURE_MESSAGE = (
@@ -236,10 +223,10 @@ class ApplicationRuntime:
         self._connected_accounts_closed = False
         self._lifecycle_lock = asyncio.Lock()
         self._startup_tasks: list[asyncio.Task[None]] = []
-        self._claude_update = _IntegrationUpdate()
-        self._desktop_update = _IntegrationUpdate()
-        self._codex_update = _IntegrationUpdate()
-        self._jetbrains_update = _IntegrationUpdate()
+        self._claude_update = IntegrationUpdate()
+        self._desktop_update = IntegrationUpdate()
+        self._codex_update = IntegrationUpdate()
+        self._jetbrains_update = IntegrationUpdate()
         self._http_ready = asyncio.Event()
         self._messaging_state = (
             "disabled" if self.settings.messaging_platform == "none" else "starting"
@@ -461,6 +448,27 @@ class ApplicationRuntime:
         self,
         updates: Mapping[str, ConfigInputValue],
     ) -> JsonObject:
+        """Apply one validated Admin config update."""
+        return await self._apply_config_update(updates, reason="admin_apply")
+
+    async def apply_config_values(
+        self,
+        updates: Mapping[str, ConfigInputValue],
+    ) -> JsonObject:
+        """Apply a config change that the Admin form does not own.
+
+        The Browser Agent card writes its keys here instead of editing the
+        managed file itself, so exactly one owner serializes config writes and
+        the running resources adopt the result.
+        """
+        return await self._apply_config_update(updates, reason="config_values")
+
+    async def _apply_config_update(
+        self,
+        updates: Mapping[str, ConfigInputValue],
+        *,
+        reason: str,
+    ) -> JsonObject:
         """Apply one validated config update without splitting runtime ownership."""
         caller = asyncio.current_task()
         assert caller is not None
@@ -507,7 +515,12 @@ class ApplicationRuntime:
                 return await self._commit_admin_update(prepared)
 
             finalization = asyncio.create_task(
-                self._finalize_admin_update(prepared, check_response, commit)
+                self._finalize_admin_update(
+                    prepared,
+                    check_response,
+                    commit,
+                    reason=reason,
+                )
             )
             return await _await_owned_task(
                 finalization,
@@ -519,6 +532,8 @@ class ApplicationRuntime:
         prepared: PreparedAdminUpdate,
         check_response: list[JsonObject],
         commit: Callable[[], Awaitable[JsonObject]],
+        *,
+        reason: str,
     ) -> JsonObject:
         assert prepared.settings is not None
         if prepared.pending_fields:
@@ -532,7 +547,7 @@ class ApplicationRuntime:
             await self.provider_manager.replace(
                 prepared.settings,
                 commit=publish_commit,
-                reason="admin_apply",
+                reason=reason,
             )
         self._pending_fields = list(prepared.pending_fields)
         automatic = bool(prepared.pending_fields and self._signal_restart())
@@ -567,9 +582,39 @@ class ApplicationRuntime:
                 "Wait for LUICODE to restart before changing the integration."
             )
 
+    async def _run_integration(
+        self,
+        operations: IntegrationOperations,
+        action: IntegrationAction,
+        update: IntegrationUpdate,
+    ) -> JsonObject:
+        """Run one integration action: config lock, worker hop, shared bookkeeping."""
+
+        async with self._config_lock:
+            self._check_integration_available()
+            settings = self.settings
+            try:
+                result = await run_sync_owned(
+                    partial(operations.operate, action, settings, update)
+                )
+            except ApplicationError:
+                raise
+            except Exception as error:
+                response = operations.translate(error)
+                if response is None:
+                    raise
+                raise response from None
+            if action in {"connect", "disconnect"}:
+                update.complete()
+            if action == "status":
+                if operations.finalize_status is not None:
+                    operations.finalize_status(result, update)
+                result["update"] = update.snapshot()
+            return result
+
     def _start_integration_update(
         self,
-        update: _IntegrationUpdate,
+        update: IntegrationUpdate,
         operation: Callable[[], Awaitable[JsonObject]],
     ) -> JsonObject:
         self._check_integration_available()
@@ -621,43 +666,9 @@ class ApplicationRuntime:
         )
 
     async def _jetbrains_acp(self, action: IntegrationAction) -> JsonObject:
-        async with self._config_lock:
-            self._check_integration_available()
-            settings = self.settings
-
-            def operate() -> JsonObject:
-                path = jetbrains_acp_integration.config_path()
-                url = local_proxy_root_url(settings)
-                if action == "refresh":
-                    return {
-                        "changed": jetbrains_acp_integration.refresh_connected(
-                            path, url, settings.proxy_auth_token
-                        )
-                    }
-                return jetbrains_acp_integration.configure(
-                    path,
-                    url,
-                    settings.proxy_auth_token,
-                    None if action == "status" else action == "connect",
-                )
-
-            try:
-                result = await run_sync_owned(operate)
-            except jetbrains_acp_integration.SetupError as exc:
-                raise InvalidRequestError(str(exc)) from None
-            except ValueError, UnicodeError:
-                raise InvalidRequestError(
-                    "Could not read JetBrains ACP configuration. Check the JSON in acp.json and the installed Claude Agent metadata."
-                ) from None
-            except OSError:
-                raise ApplicationUnavailableError(
-                    "Could not access JetBrains ACP files. Finish any configuration edits, check file permissions, and retry."
-                ) from None
-            if action in {"connect", "disconnect"}:
-                self._jetbrains_update.complete()
-            if action == "status":
-                result["update"] = self._jetbrains_update.snapshot()
-            return result
+        return await self._run_integration(
+            JETBRAINS_OPERATIONS, action, self._jetbrains_update
+        )
 
     async def claude_desktop_status(self) -> JsonObject:
         return await self._claude_desktop("status")
@@ -674,108 +685,14 @@ class ApplicationRuntime:
         )
 
     async def _claude_desktop(self, action: IntegrationAction) -> JsonObject:
-        async with self._config_lock:
-            self._check_integration_available()
-            settings = self.settings
-
-            def operate() -> JsonObject:
-                root = claude_desktop_integration.config_root()
-                url = local_proxy_root_url(settings)
-                if action == "refresh":
-                    return {
-                        "changed": claude_desktop_integration.refresh_connected(
-                            root,
-                            url,
-                            settings.proxy_auth_token,
-                            disconnect_path=claude_desktop_disconnect_path(),
-                        )
-                    }
-                return claude_desktop_integration.configure(
-                    root,
-                    url,
-                    settings.proxy_auth_token,
-                    None if action == "status" else action == "connect",
-                    disconnect_path=claude_desktop_disconnect_path(),
-                )
-
-            try:
-                result = await run_sync_owned(operate)
-            except claude_desktop_integration.ManagedDesktopError:
-                raise InvalidRequestError(
-                    "Claude Desktop is managed by an organization, or its policy could not be read. LUICODE can configure only unmanaged Desktop installations."
-                ) from None
-            except claude_desktop_integration.PendingDisconnectError:
-                raise InvalidRequestError(
-                    "Finish disconnecting Claude Desktop before connecting again."
-                ) from None
-            except claude_desktop_integration.PendingMigrationError:
-                raise InvalidRequestError(
-                    "Claude Desktop has data in its previous Windows location. Launch Claude Desktop once so it can migrate that data, fully quit it, then retry Connect."
-                ) from None
-            except ValueError, UnicodeError:
-                raise InvalidRequestError(
-                    "Could not configure Claude Desktop. Check its configuration JSON and LUICODE disconnect record, and ensure LUICODE uses a localhost address and a nonempty managed token."
-                ) from None
-            except OSError:
-                raise ApplicationUnavailableError(
-                    "Could not access Claude Desktop settings or the LUICODE disconnect record. Fully quit Claude Desktop, check file permissions, and retry."
-                ) from None
-            if action in {"connect", "disconnect"}:
-                self._desktop_update.complete()
-            if action == "status":
-                if self._desktop_update.state != "ready":
-                    result["connected"] = None
-                result["update"] = self._desktop_update.snapshot()
-            return result
+        return await self._run_integration(
+            DESKTOP_OPERATIONS, action, self._desktop_update
+        )
 
     async def _claude_vscode(self, action: IntegrationAction) -> JsonObject:
-        async with self._config_lock:
-            self._check_integration_available()
-            settings = self.settings
-
-            def operate() -> JsonObject:
-                path = claude_integration.settings_path()
-                state_path = claude_integration.claude_state_path()
-                if action == "status" and self._claude_update.state != "ready":
-                    return {
-                        "connected": None,
-                        "paths": {
-                            "vscode_settings": str(path.resolve()),
-                            "claude_state": str(state_path.resolve()),
-                        },
-                    }
-                if action == "refresh":
-                    return {
-                        "changed": claude_integration.refresh_connected(
-                            path,
-                            state_path,
-                            local_proxy_root_url(settings),
-                            settings.proxy_auth_token,
-                        )
-                    }
-                return claude_integration.configure(
-                    path,
-                    state_path,
-                    local_proxy_root_url(settings),
-                    settings.proxy_auth_token,
-                    None if action == "status" else action == "connect",
-                )
-
-            try:
-                result = await run_sync_owned(operate)
-            except ValueError, UnicodeError:
-                raise InvalidRequestError(
-                    "Could not read Claude integration settings. Check the JSON in VS Code settings.json and .claude.json."
-                ) from None
-            except OSError:
-                raise ApplicationUnavailableError(
-                    "Could not access VS Code settings.json or .claude.json. Check file permissions and try again."
-                ) from None
-            if action in {"connect", "disconnect"}:
-                self._claude_update.complete()
-            if action == "status":
-                result["update"] = self._claude_update.snapshot()
-            return result
+        return await self._run_integration(
+            VSCODE_OPERATIONS, action, self._claude_update
+        )
 
     async def codex_integration_status(self) -> JsonObject:
         return await self._codex_integration("status")

@@ -10,6 +10,7 @@ UV_WORKFLOWS = (
     Path(".github/workflows/tests.yml"),
     Path(".github/workflows/post-merge.yml"),
     Path(".github/workflows/version-policy.yml"),
+    Path(".github/workflows/smoke.yml"),
 )
 REQUIRED_TEST_RUNNERS = {
     "Linux": "ubuntu-latest",
@@ -97,7 +98,7 @@ def test_uv_workflows_share_managed_python_cache_policy() -> None:
         assert "uv-python-v" not in workflow
 
 
-def test_shared_setup_installs_dependencies_except_for_post_merge_jobs() -> None:
+def test_shared_setup_installs_dependencies_except_for_cache_only_jobs() -> None:
     setup = yaml.safe_load(CI_SETUP.read_text(encoding="utf-8"))
     assert setup["inputs"]["sync-dependencies"]["default"] == "true"
     sync = next(
@@ -107,12 +108,18 @@ def test_shared_setup_installs_dependencies_except_for_post_merge_jobs() -> None
     )
     assert sync["run"] == "uv sync --locked --group dev"
     assert sync["if"] == "inputs.sync-dependencies == 'true'"
+    # A post-merge job that only exchanges caches must not install dependencies;
+    # the job that runs the suite before publishing must.
+    cache_only_jobs = {"warm-dependency-cache", "publish"}
     for path in UV_WORKFLOWS:
         jobs = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
-        for job in jobs.values():
+        for name, job in jobs.items():
             for step in job["steps"]:
                 if step.get("uses") == "./.github/actions/ci-environment":
-                    assert step["with"].get("sync-dependencies", "true") == (
-                        "false" if path.name == "post-merge.yml" else "true"
+                    expected = (
+                        "false"
+                        if path.name == "post-merge.yml" and name in cache_only_jobs
+                        else "true"
                     )
+                    assert step["with"].get("sync-dependencies", "true") == expected
                 assert step.get("run") != "uv sync --locked --group dev"

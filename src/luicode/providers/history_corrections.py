@@ -1,4 +1,9 @@
-"""Provider connection provenance and precise historical request corrections."""
+"""Provider-side history provenance and precise historical request corrections.
+
+The wire-level replay primitives live in :mod:`luicode.core.history_replay`;
+this module owns the provider-specific decisions about which historical request
+to resend after an upstream rejection, and how to replay its connection origin.
+"""
 
 import hashlib
 import json

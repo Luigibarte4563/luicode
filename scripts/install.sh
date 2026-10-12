@@ -2059,8 +2059,8 @@ print_success() {
             web_root_url=$(printf '%s\n' "$web_urls" | sed -n '1p')
             web_admin_url=$(printf '%s\n' "$web_urls" | sed -n '2p')
         else
-            # Settings defaults: HOST 0.0.0.0, normalized to loopback for
-            # same-device browsing.
+            # Settings default: HOST 127.0.0.1 (loopback only), which is the
+            # address this same-device browser uses.
             web_root_url="http://127.0.0.1:$LUICODE_DEFAULT_PORT"
             web_admin_url="$web_root_url/admin"
         fi

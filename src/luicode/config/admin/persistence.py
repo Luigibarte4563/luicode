@@ -39,6 +39,9 @@ class PreparedAdminUpdate:
     pending_fields: tuple[str, ...]
     path: Path
     changed_keys: tuple[str, ...] = ()
+    # The managed snapshot this update was prepared against, so a concurrent
+    # writer is detected at commit time instead of being silently overwritten.
+    expected_managed: Mapping[str, str] | None = None
 
     @property
     def valid(self) -> bool:
@@ -168,6 +171,7 @@ def prepare_admin_update(
         pending_fields=pending_fields,
         path=snapshot.path,
         changed_keys=changed_keys,
+        expected_managed=dict(snapshot.managed),
     )
 
 

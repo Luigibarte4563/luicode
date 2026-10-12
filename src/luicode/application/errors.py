@@ -39,3 +39,10 @@ class ApplicationUnavailableError(ApplicationError):
 
     kind = FailureKind.UNAVAILABLE
     status_code = 503
+
+
+class ConfigConflictError(ApplicationError):
+    """Saved configuration changed between preparing and committing an update."""
+
+    kind = FailureKind.INVALID_REQUEST
+    status_code = 409

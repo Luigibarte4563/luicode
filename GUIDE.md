@@ -16,7 +16,7 @@ uv run luicode-server --port 8082
 
 Then open `http://127.0.0.1:8082/admin` in your browser.
 
-**Android/Termux:** Use `termux-open-url http://127.0.0.1:8082/admin` to open the Admin UI in your mobile browser. For LAN access from another device, bind to `0.0.0.0` and enable **Proxy Authentication** (see [docs/android.md](docs/android.md)).
+**Android/Termux:** Use `termux-open-url http://127.0.0.1:8082/admin` to open the Admin UI in your mobile browser. The proxy binds loopback only by default; for LAN access from another device, set `HOST=0.0.0.0` **and** enable **Proxy Authentication** (`PROXY_AUTH_ENABLED=true` plus `ANTHROPIC_AUTH_TOKEN`), because a non-loopback bind without authentication is refused (see [docs/android.md](docs/android.md)).
 
 ### Navigation
 

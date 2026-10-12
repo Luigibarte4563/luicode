@@ -3,7 +3,7 @@
 import asyncio
 import sys
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from functools import partial
@@ -73,7 +73,7 @@ from luicode.providers.failure_policy import (
     provider_authentication_status,
     underlying_provider_error,
 )
-from luicode.providers.history_replay import (
+from luicode.providers.history_corrections import (
     replay_origin,
     validate_history,
 )
@@ -127,7 +127,6 @@ from .usage import (
     usage_int,
 )
 
-OpenAIAsyncCredentialProvider = Callable[[], Awaitable[str]]
 _ExtraReasoningEvents = Callable[[Any, ChatStreamOutput], Iterator[str]]
 _ChatOutputFactory = Callable[[], ChatStreamOutput]
 

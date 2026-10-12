@@ -37,7 +37,9 @@ from .admin_security import require_loopback_admin
 from .dependencies import get_services
 from .ports import ApiServices
 
-router = APIRouter()
+# The loopback boundary is a router-level dependency, so a new Admin endpoint
+# cannot be added without it.
+router = APIRouter(dependencies=[Depends(require_loopback_admin)])
 
 STATIC_DIR = Path(__file__).resolve().parent / "admin_static"
 PACKAGE_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
@@ -116,22 +118,19 @@ def admin_page_response() -> HTMLResponse:
 @router.get("/admin/messaging", include_in_schema=False)
 @router.get("/admin/usage", include_in_schema=False)
 @router.get("/admin/integrations", include_in_schema=False)
-def admin_page(request: Request):
-    require_loopback_admin(request)
+def admin_page():
     return admin_page_response()
 
 
 @router.get("/admin/assets/{version}/{filename:path}", include_in_schema=False)
-async def admin_asset(version: str, filename: str, request: Request):
-    require_loopback_admin(request)
+async def admin_asset(version: str, filename: str):
     if version != package_version() or filename not in _ADMIN_ASSET_FILENAMES:
         raise HTTPException(status_code=404, detail="Admin asset not found")
     return _asset_response(filename)
 
 
 @router.get("/admin/browser", include_in_schema=False)
-def admin_browser_page(request: Request):
-    require_loopback_admin(request)
+def admin_browser_page():
     return admin_page_response()
 
 
@@ -156,10 +155,8 @@ def _browser_agent(services: ApiServices):
 
 @router.get("/admin/api/browser/jev/status")
 async def browser_agent_status(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     service = _browser_agent(services)
     return _no_store(
         {
@@ -172,10 +169,8 @@ async def browser_agent_status(
 @router.post("/admin/api/browser/jev/connect")
 async def browser_agent_connect(
     payload: BrowserAgentConnectPayload,
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     # Page state leaves the machine during a browse task, so the user must
     # acknowledge it explicitly (SEC-2).
     if not payload.confirm_data_processing:
@@ -200,46 +195,35 @@ async def browser_agent_connect(
 
 @router.post("/admin/api/browser/jev/disconnect")
 async def browser_agent_disconnect(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return _no_store(await _browser_agent(services).disconnect())
 
 
 @router.post("/admin/api/browser/jev/stop")
 async def browser_agent_stop(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return _no_store(_browser_agent(services).stop())
 
 
 @router.get("/admin/api/browser/jev/runs")
 async def browser_agent_runs(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return _no_store(_browser_agent(services).runs())
 
 
 @router.get("/admin/api/config")
-async def get_admin_config(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def get_admin_config(services: ApiServices = Depends(get_services)):
     return await services.admin.admin_config()
 
 
 @router.post("/admin/api/config/apply")
 async def apply_admin_config(
     payload: AdminConfigPayload,
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     result = await services.admin.apply_admin_config(_filtered_values(payload.values))
     return result
 
@@ -250,7 +234,6 @@ async def admin_status(
     response: Response,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     # A local Admin page may reconnect after Apply changes the listening port.
     # The existing security check admits only loopback callers and origins.
     if origin := request.headers.get("origin"):
@@ -260,10 +243,7 @@ async def admin_status(
 
 
 @router.get("/admin/api/providers/local-status")
-async def local_provider_status(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def local_provider_status(services: ApiServices = Depends(get_services)):
     values = {
         key: entry.value or ""
         for key, entry in (await services.admin.admin_values()).items()
@@ -284,20 +264,16 @@ async def local_provider_status(
 @router.post("/admin/api/providers/{provider_id}/test")
 async def test_provider(
     provider_id: str,
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await services.admin.test_provider(provider_id)
 
 
 @router.get("/admin/api/providers/{provider_id}/auth")
 async def connected_account_status(
     provider_id: str,
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     _require_connected_account_provider(provider_id)
     status = await services.admin.connected_account_status(provider_id)
     return _no_store(status.as_dict())
@@ -307,10 +283,8 @@ async def connected_account_status(
 async def start_connected_account_login(
     provider_id: str,
     payload: ConnectedAccountLoginPayload,
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     _require_connected_account_provider(provider_id)
     account = await services.admin.connected_account_status(provider_id)
     mode = payload.mode or account.default_login_mode
@@ -332,10 +306,8 @@ async def start_connected_account_login(
 @router.post("/admin/api/providers/{provider_id}/auth/cancel")
 async def cancel_connected_account_login(
     provider_id: str,
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     _require_connected_account_provider(provider_id)
     status = await services.admin.cancel_connected_account_login(provider_id)
     return _no_store(status.as_dict())
@@ -344,10 +316,8 @@ async def cancel_connected_account_login(
 @router.delete("/admin/api/providers/{provider_id}/auth")
 async def disconnect_connected_account(
     provider_id: str,
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     _require_connected_account_provider(provider_id)
     status = await services.admin.disconnect_connected_account(provider_id)
     return _no_store(status.as_dict())
@@ -355,146 +325,104 @@ async def disconnect_connected_account(
 
 @router.get("/admin/api/models")
 async def models(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return _model_options(services)
 
 
 @router.get("/admin/api/integrations/claude-vscode")
 async def claude_vscode_status(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await _integration_response(services.admin.claude_vscode_status)
 
 
 @router.post("/admin/api/integrations/claude-vscode/connect")
 async def connect_claude_vscode(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await _integration_response(services.admin.connect_claude_vscode)
 
 
 @router.post("/admin/api/integrations/claude-vscode/refresh")
 async def refresh_claude_vscode(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await _integration_response(services.admin.refresh_claude_vscode)
 
 
 @router.post("/admin/api/integrations/claude-vscode/disconnect")
 async def disconnect_claude_vscode(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await _integration_response(services.admin.disconnect_claude_vscode)
 
 
 @router.get("/admin/api/integrations/claude-desktop")
-async def claude_desktop_status(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def claude_desktop_status(services: ApiServices = Depends(get_services)):
     return await _integration_response(services.admin.claude_desktop_status)
 
 
 @router.post("/admin/api/integrations/claude-desktop/connect")
-async def connect_claude_desktop(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def connect_claude_desktop(services: ApiServices = Depends(get_services)):
     return await _integration_response(services.admin.connect_claude_desktop)
 
 
 @router.post("/admin/api/integrations/claude-desktop/disconnect")
-async def disconnect_claude_desktop(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def disconnect_claude_desktop(services: ApiServices = Depends(get_services)):
     return await _integration_response(services.admin.disconnect_claude_desktop)
 
 
 @router.post("/admin/api/integrations/claude-desktop/refresh")
-async def refresh_claude_desktop(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def refresh_claude_desktop(services: ApiServices = Depends(get_services)):
     return await _integration_response(services.admin.refresh_claude_desktop)
 
 
 @router.get("/admin/api/integrations/jetbrains-acp")
-async def jetbrains_acp_status(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def jetbrains_acp_status(services: ApiServices = Depends(get_services)):
     return await _integration_response(services.admin.jetbrains_acp_status)
 
 
 @router.post("/admin/api/integrations/jetbrains-acp/connect")
-async def connect_jetbrains_acp(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def connect_jetbrains_acp(services: ApiServices = Depends(get_services)):
     return await _integration_response(services.admin.connect_jetbrains_acp)
 
 
 @router.post("/admin/api/integrations/jetbrains-acp/disconnect")
-async def disconnect_jetbrains_acp(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def disconnect_jetbrains_acp(services: ApiServices = Depends(get_services)):
     return await _integration_response(services.admin.disconnect_jetbrains_acp)
 
 
 @router.post("/admin/api/integrations/jetbrains-acp/refresh")
-async def refresh_jetbrains_acp(
-    request: Request, services: ApiServices = Depends(get_services)
-):
-    require_loopback_admin(request)
+async def refresh_jetbrains_acp(services: ApiServices = Depends(get_services)):
     return await _integration_response(services.admin.refresh_jetbrains_acp)
 
 
 @router.get("/admin/api/integrations/codex")
 async def codex_integration_status(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await _integration_response(services.admin.codex_integration_status)
 
 
 @router.post("/admin/api/integrations/codex/connect")
 async def connect_codex(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await _integration_response(services.admin.connect_codex)
 
 
 @router.post("/admin/api/integrations/codex/refresh")
 async def refresh_codex_integration(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await _integration_response(services.admin.refresh_codex_integration)
 
 
 @router.post("/admin/api/integrations/codex/disconnect")
 async def disconnect_codex(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     return await _integration_response(services.admin.disconnect_codex)
 
 
@@ -513,10 +441,8 @@ async def _integration_response(
 
 @router.post("/admin/api/models/refresh")
 async def refresh_models(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     result = await services.admin.refresh_models()
     return _model_options(services, refresh_result=result)
 
@@ -603,17 +529,14 @@ def _require_connected_account_provider(provider_id: str) -> None:
 
 @router.get("/admin/api/usage/summary")
 async def usage_summary(
-    request: Request,
     services: ApiServices = Depends(get_services),
     since_hours: int = 24,
 ):
-    require_loopback_admin(request)
     return _no_store(await services.admin.usage_summary(since_hours))
 
 
 @router.get("/admin/api/usage/requests")
 async def usage_requests(
-    request: Request,
     services: ApiServices = Depends(get_services),
     limit: int = 100,
     offset: int = 0,
@@ -622,7 +545,6 @@ async def usage_requests(
     agent: str | None = None,
     outcome: str | None = None,
 ):
-    require_loopback_admin(request)
     return _no_store(
         await services.admin.usage_requests(
             since_hours=since_hours,
@@ -637,13 +559,11 @@ async def usage_requests(
 
 @router.get("/admin/api/usage/optimizations")
 async def usage_optimizations(
-    request: Request,
     services: ApiServices = Depends(get_services),
     limit: int = 100,
     since_hours: int = 24,
     optimization: str | None = None,
 ):
-    require_loopback_admin(request)
     return _no_store(
         await services.admin.usage_optimizations(
             since_hours=since_hours,
@@ -656,9 +576,6 @@ async def usage_optimizations(
 @router.get(
     "/admin/api/usage/events",
     response_class=EventSourceResponse,
-    # The loopback check must run as a dependency: raising once the stream has
-    # started cannot be converted into a 403 response.
-    dependencies=[Depends(require_loopback_admin)],
 )
 async def usage_events(
     services: ApiServices = Depends(get_services),
@@ -692,10 +609,8 @@ async def usage_events(
 
 @router.get("/admin/api/providers/health")
 async def providers_health(
-    request: Request,
     services: ApiServices = Depends(get_services),
 ):
-    require_loopback_admin(request)
     lease = await services.requests.acquire()
     try:
         health_data = []

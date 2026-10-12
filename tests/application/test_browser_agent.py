@@ -34,7 +34,9 @@ def _settings(**overrides) -> Settings:
 
 
 def _service(port, **overrides) -> BrowserAgentService:
-    return BrowserAgentService(port=port, settings=_settings(**overrides))
+    return BrowserAgentService(
+        port=port, settings_provider=lambda: _settings(**overrides)
+    )
 
 
 # --------------------------------------------------------------- AC-1 / FR-13
@@ -337,3 +339,28 @@ def test_blocked_helper_shape_is_stable():
     result = blocked_result()
     assert result.status is BrowseStatus.BLOCKED
     assert result.reason is BrowseReason.BLOCKED_DOMAIN
+
+
+# ------------------------------------------------------------ FR-24 / SEC-3/4
+
+
+def test_policy_follows_a_settings_change_without_rebuilding_the_service():
+    """A domain removed from the allowlist is blocked on the next task.
+
+    Regression guard: the service used to hold a startup snapshot, so an Admin
+    edit only took effect after a restart.
+    """
+
+    live = {"settings": _settings()}
+    service = BrowserAgentService(
+        port=RecordingBrowserAgent(),
+        settings_provider=lambda: live["settings"],
+    )
+
+    assert service.check_url("https://example.com").allowed is True
+
+    live["settings"] = _settings(JEV_ALLOWED_DOMAINS="other.test")
+
+    decision = service.check_url("https://example.com")
+    assert decision.allowed is False
+    assert decision.reason is BrowseReason.BLOCKED_DOMAIN

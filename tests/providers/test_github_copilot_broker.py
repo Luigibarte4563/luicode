@@ -14,7 +14,7 @@ from luicode.providers.github_copilot.types import (
     CopilotIdentity,
     CopilotUnavailable,
 )
-from luicode.providers.history_replay import replay_origin
+from luicode.providers.history_corrections import replay_origin
 from tests.providers.copilot_support import FakeRuntime, model
 
 

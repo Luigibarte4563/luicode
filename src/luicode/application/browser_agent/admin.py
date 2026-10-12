@@ -4,20 +4,24 @@ import asyncio
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 
-from luicode.config.loader import ManagedConfigStore, clear_settings_cache
+from luicode.application.errors import ApplicationError
+from luicode.config.admin.state import ConfigInputValue
 from luicode.core.json_types import JsonObject
 
-from ..browser_agent.service import BrowserAgentService
+from .ports import ConfigValuesWriter
+from .service import BrowserAgentService
 
 _INSTALL_TIMEOUT_SECONDS = 180.0
-_JEV_DISTRIBUTION = "jev-ultrafast"
 _JEV_GIT_URL = "https://github.com/kitasota/jev-ultrafast.git"
 
 _STATUS_NOT_CONNECTED = "not_connected"
 _STATUS_CONNECTED = "connected"
 _STATUS_ERROR = "error"
+
+_REJECTED_DEFAULT_MESSAGE = "The browser-agent settings were rejected."
 
 
 @dataclass
@@ -26,17 +30,12 @@ class JevInstallResult:
     message: str
 
 
-def _uv_executable() -> str | None:
-    """Return the uv binary, or None with an actionable explanation."""
-    found = shutil.which("uv")
-    if found:
-        return found
+def _jev_available() -> bool:
+    """Ask the runtime adapter that owns the Jev probe."""
+
     from luicode.runtime.browser_agent.jev import jev_available
 
-    if jev_available():
-        # Already importable, so a missing uv is not a blocker.
-        return None
-    return None
+    return jev_available()
 
 
 async def install_jev() -> JevInstallResult:
@@ -46,7 +45,9 @@ async def install_jev() -> JevInstallResult:
     distribution name differs from the import name, which is why FR-8's literal
     ``pip install jev_ultrafast`` cannot work as written.
     """
-    uv = _uv_executable()
+    if _jev_available():
+        return JevInstallResult(ok=True, message="Jev is already installed.")
+    uv = shutil.which("uv")
     if uv is None:
         return JevInstallResult(
             ok=False,
@@ -90,16 +91,21 @@ async def install_jev() -> JevInstallResult:
 
 
 class BrowserAgentAdminService:
-    """Own browser-agent configuration state for the Admin API."""
+    """Own browser-agent configuration state for the Admin API.
+
+    Configuration changes go through ``writer`` so the runtime stays the single
+    owner of the managed file, and status is read from the live settings rather
+    than a startup snapshot.
+    """
 
     def __init__(
         self,
         *,
-        store: ManagedConfigStore,
         service: BrowserAgentService,
+        writer: ConfigValuesWriter,
     ) -> None:
-        self._store = store
         self._service = service
+        self._writer = writer
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ status
@@ -155,12 +161,21 @@ class BrowserAgentAdminService:
 
     # ----------------------------------------------------------------- connect
 
-    def _read_managed(self) -> dict[str, str]:
-        return dict(self._store.read().managed)
+    async def _save(self, updates: Mapping[str, ConfigInputValue]) -> str | None:
+        """Write through the runtime owner; return a user-facing error, if any."""
 
-    def _commit(self, values: dict[str, str]) -> None:
-        self._store.commit(values)
-        clear_settings_cache()
+        try:
+            result = await self._writer.apply_config_values(updates)
+        except ApplicationError as error:
+            return error.message
+        except Exception as error:
+            return f"Could not save the browser-agent settings: {type(error).__name__}"
+        if result.get("applied"):
+            return None
+        errors = result.get("errors")
+        if isinstance(errors, list) and errors:
+            return "; ".join(str(item) for item in errors)
+        return _REJECTED_DEFAULT_MESSAGE
 
     async def connect(
         self,
@@ -186,39 +201,36 @@ class BrowserAgentAdminService:
             if not installed.ok:
                 return {"ok": False, "error": installed.message, "changed": []}
 
-            changed: list[str] = []
-            values = self._read_managed()
-            values["TYPESAFE_API_KEY"] = typesafe_api_key.strip()
-            changed.append("TYPESAFE_API_KEY")
+            updates: dict[str, ConfigInputValue] = {
+                "TYPESAFE_API_KEY": typesafe_api_key.strip(),
+            }
+            changed = ["TYPESAFE_API_KEY"]
             if text_model_api_key.strip():
-                values["TEXT_MODEL_API_KEY"] = text_model_api_key.strip()
+                updates["TEXT_MODEL_API_KEY"] = text_model_api_key.strip()
                 changed.append("TEXT_MODEL_API_KEY")
-            else:
-                values.setdefault("TEXT_MODEL_API_KEY", "")
-            values["JEV_ALLOWED_DOMAINS"] = allowed_domains.strip()
+            updates["JEV_ALLOWED_DOMAINS"] = allowed_domains.strip()
             changed.append("JEV_ALLOWED_DOMAINS")
-            values["JEV_ENABLED"] = "true"
+            updates["JEV_ENABLED"] = "true"
             changed.append("JEV_ENABLED")
 
-            try:
-                self._commit(values)
-            except Exception as error:
-                return {
-                    "ok": False,
-                    "error": f"Could not save the browser-agent settings: {type(error).__name__}",
-                    "changed": [],
-                }
+            failure = await self._save(updates)
+            if failure is not None:
+                return {"ok": False, "error": failure, "changed": []}
             return {"ok": True, "changed": changed, "error": ""}
 
     async def disconnect(self) -> JsonObject:
         """Disable the feature and clear both keys, keeping the package (FR-10)."""
         async with self._lock:
-            values = self._read_managed()
-            values["JEV_ENABLED"] = "false"
-            values.pop("TYPESAFE_API_KEY", None)
-            values.pop("TEXT_MODEL_API_KEY", None)
-            self._commit(values)
-            return {"ok": True, "changed": ["JEV_ENABLED"]}
+            failure = await self._save(
+                {
+                    "JEV_ENABLED": "false",
+                    "TYPESAFE_API_KEY": None,
+                    "TEXT_MODEL_API_KEY": None,
+                }
+            )
+            if failure is not None:
+                return {"ok": False, "error": failure, "changed": []}
+            return {"ok": True, "changed": ["JEV_ENABLED"], "error": ""}
 
     def stop(self) -> JsonObject:
         """Cancel any running task (SEC-10)."""

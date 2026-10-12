@@ -30,6 +30,7 @@ from luicode.providers.model_listing import (
 from luicode.providers.openai_client import OpenAIRequestClient
 from luicode.providers.openai_responses import OpenAIResponsesTransport
 from luicode.providers.request_recovery import RequestRecovery
+from luicode.providers.sdk_client import openai_http_client, provider_timeout
 
 from .auth import OpenAIAuthManager
 from .endpoint import CodexEndpointContext
@@ -65,17 +66,15 @@ class OpenAICodexProvider(BaseProvider):
             if transport is not None
             else httpx2.AsyncHTTPTransport(proxy=config.proxy)
         )
-        timeout = httpx2.Timeout(
-            config.http_read_timeout,
-            connect=config.http_connect_timeout,
-            write=config.http_write_timeout,
-        )
+        timeout = provider_timeout(config)
         self._client = AsyncOpenAI(
             api_key=_endpoint_required,
             base_url=config.base_url,
             max_retries=0,
             timeout=timeout,
-            http_client=httpx2.AsyncClient(transport=self._pool, timeout=timeout),
+            http_client=openai_http_client(
+                config, timeout=timeout, transport=self._pool
+            ),
         )
         self._responses = OpenAIResponsesTransport(
             client=self._client,

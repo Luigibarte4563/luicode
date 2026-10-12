@@ -1,16 +1,18 @@
 """Worker boundary for managed configuration; runtime state stays on the loop."""
 
 from collections.abc import Mapping
+from functools import partial
 
 from anyio import CapacityLimiter, to_thread
 
+from luicode.application.errors import ConfigConflictError
 from luicode.config.admin.persistence import (
     PreparedAdminUpdate,
     prepare_admin_update,
 )
 from luicode.config.admin.state import ConfigInputValue, ValueState
 from luicode.config.admin.values import load_config_response, load_value_state
-from luicode.config.loader import ManagedConfigStore
+from luicode.config.loader import ManagedConfigConflictError, ManagedConfigStore
 from luicode.config.settings import Settings
 from luicode.core.json_types import JsonObject
 
@@ -47,7 +49,15 @@ class ConfigurationService:
     async def commit(self, prepared: PreparedAdminUpdate) -> JsonObject:
         if not prepared.valid:
             raise ValueError("Cannot commit an invalid Admin update")
-        await to_thread.run_sync(
-            self._store.commit, prepared.target_values, limiter=self._worker_limiter
-        )
+        try:
+            await to_thread.run_sync(
+                partial(
+                    self._store.commit,
+                    prepared.target_values,
+                    expected_managed=prepared.expected_managed,
+                ),
+                limiter=self._worker_limiter,
+            )
+        except ManagedConfigConflictError as error:
+            raise ConfigConflictError(str(error)) from None
         return prepared.applied_response()

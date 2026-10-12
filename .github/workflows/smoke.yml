@@ -1,0 +1,57 @@
+# Scheduled live smoke for the surfaces that need no provider credentials.
+#
+# Pull-request CI stays hermetic (`tests/`); these scenarios launch a real server
+# and subprocesses, and the remaining targets need provider keys, local model
+# servers, bot tokens, or a Termux device. See smoke/README.md for the taxonomy.
+name: Smoke
+
+env:
+  CI_UV_VERSION: "0.12.13"
+  UV_MALWARE_CHECK: "1"
+  UV_PREVIEW_FEATURES: "malware-check"
+
+on:
+  schedule:
+    # 03:17 UTC daily; off the hour to avoid the busiest scheduled window.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (no-provider targets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Set up CI environment
+        uses: ./.github/actions/ci-environment
+        with:
+          uv-version: ${{ env.CI_UV_VERSION }}
+          runner-label: ubuntu-latest
+          prepare-node: "true"
+
+      - name: Run smoke
+        env:
+          LUICODE_LIVE_SMOKE: "1"
+          LUICODE_SMOKE_TARGETS: "auth,config,extensibility,messaging"
+          LUICODE_ALLOW_NO_PROVIDER_SMOKE: "1"
+        run: uv run --locked pytest smoke -n 0 -s --tb=short
+
+      - name: Upload smoke results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: smoke-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .smoke-results/
+          if-no-files-found: ignore
+          retention-days: 7

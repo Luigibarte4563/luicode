@@ -27,6 +27,7 @@ from luicode.providers.openai_chat import (
     OpenAIChatTransport,
 )
 from luicode.providers.openai_responses import OpenAIResponsesTransport
+from luicode.providers.sdk_client import provider_timeout
 
 from .auth import CopilotAuthManager
 from .lifecycle import drain_owned
@@ -82,15 +83,14 @@ class GitHubCopilotProvider(BaseProvider):
         self._openai_pool = openai_transport or httpx2.AsyncHTTPTransport(
             proxy=config.proxy
         )
+        # The pool above carries the provider proxy at the transport level, so the
+        # SDK client is built without a client-level proxy: adding one would apply
+        # the same proxy twice.
         self._client = AsyncOpenAI(
             api_key=_endpoint_required,
             base_url=config.base_url,
             max_retries=0,
-            timeout=httpx2.Timeout(
-                config.http_read_timeout,
-                connect=config.http_connect_timeout,
-                write=config.http_write_timeout,
-            ),
+            timeout=provider_timeout(config),
         )
         self._responses = OpenAIResponsesTransport(
             client=self._client,

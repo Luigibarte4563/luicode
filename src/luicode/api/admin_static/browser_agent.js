@@ -241,8 +241,12 @@
   function bind() {
     const connect = byId("jevConnect");
     if (connect) connect.addEventListener("click", openDialog);
-    const disconnect = byId("jevDisconnect");
-    if (disconnect) disconnect.addEventListener("click", disconnect);
+    // Keep the element binding distinct from the handler name: naming it
+    // `disconnect` would pass the element itself to addEventListener, which
+    // silently does nothing.
+    const disconnectButton = byId("jevDisconnect");
+    if (disconnectButton)
+      disconnectButton.addEventListener("click", disconnect);
     const stopButton = byId("jevStop");
     if (stopButton) stopButton.addEventListener("click", stop);
     const refresh = byId("jevRefreshRuns");
