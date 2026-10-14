@@ -18,7 +18,7 @@ def _model(
     reasoning: bool = True,
     vision: bool = False,
 ) -> CatalogModel:
-    mods = (
+    mods = frozenset(
         (ModelInputModality.TEXT, ModelInputModality.IMAGE)
         if vision
         else (ModelInputModality.TEXT,)
@@ -34,15 +34,17 @@ def _model(
     )
 
 
-def _build(models: tuple[CatalogModel, ...], **overrides: object) -> str:
+def _build(
+    models: tuple[CatalogModel, ...], *, stream_idle_timeout_secs: int | None = None
+) -> str:
     catalog = ModelCatalog(models, models[0].wire_slug)
-    kwargs: dict[str, object] = {
-        "base_url": "http://127.0.0.1:8082/v1",
-        "api_key_env": "LUICODE_JCODE_TOKEN",
-        "default_model": catalog.default_model_id,
-    }
-    kwargs.update(overrides)
-    return build_jcode_config(catalog.models, **kwargs)  # type: ignore[arg-type]
+    return build_jcode_config(
+        catalog.models,
+        base_url="http://127.0.0.1:8082/v1",
+        api_key_env="LUICODE_JCODE_TOKEN",
+        default_model=catalog.default_model_id,
+        stream_idle_timeout_secs=stream_idle_timeout_secs,
+    )
 
 
 def test_build_jcode_config_basic():

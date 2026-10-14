@@ -217,6 +217,7 @@ if [ "${{1:-}}" = "tool" ] && [ "${{2:-}}" = "install" ]; then
     cp "$FAKE_FIXTURES/luicode-command.sh" "$tool_bin/luicode-grok"
     cp "$FAKE_FIXTURES/luicode-command.sh" "$tool_bin/luicode-muse"
     cp "$FAKE_FIXTURES/luicode-command.sh" "$tool_bin/luicode-aider"
+    cp "$FAKE_FIXTURES/luicode-command.sh" "$tool_bin/luicode-jcode"
     cp "$FAKE_FIXTURES/luicode-command.sh" "$tool_bin/luicode-update"
     if [ "$FAIL_STEP" != "luicode-missing" ]; then
         cp "$FAKE_FIXTURES/luicode-command.sh" "$tool_bin/luicode-codex"
@@ -2550,6 +2551,7 @@ copy /y "%FAKE_FIXTURES%\luicode-command.cmd" "%UV_BIN_DIR%\luicode-dsh.cmd" >nu
 copy /y "%FAKE_FIXTURES%\luicode-command.cmd" "%UV_BIN_DIR%\luicode-grok.cmd" >nul
 copy /y "%FAKE_FIXTURES%\luicode-command.cmd" "%UV_BIN_DIR%\luicode-muse.cmd" >nul
 copy /y "%FAKE_FIXTURES%\luicode-command.cmd" "%UV_BIN_DIR%\luicode-aider.cmd" >nul
+copy /y "%FAKE_FIXTURES%\luicode-command.cmd" "%UV_BIN_DIR%\luicode-jcode.cmd" >nul
 copy /y "%FAKE_FIXTURES%\luicode-command.cmd" "%UV_BIN_DIR%\luicode-update.cmd" >nul
 if not "%FAIL_STEP%"=="luicode-missing" copy /y "%FAKE_FIXTURES%\luicode-command.cmd" "%UV_BIN_DIR%\luicode-codex.cmd" >nul
 exit /b 0
