@@ -19,6 +19,7 @@ LUICODE_COMMANDS = (
     "luicode-grok",
     "luicode-muse",
     "luicode-aider",
+    "luicode-jcode",
     "luicode-update",
     "luicode-init",
     "luicode",
@@ -192,7 +193,7 @@ if [ "${1:-}" = "tool" ] && [ "${2:-}" = "uninstall" ]; then
         echo 'Tool `luicode` is not installed' >&2
         exit 2
     fi
-    for name in luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-update luicode-init luicode; do
+    for name in luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-jcode luicode-update luicode-init luicode; do
         /bin/rm -f "$FAKE_TOOL_BIN/$name"
     done
     echo "Uninstalled luicode"

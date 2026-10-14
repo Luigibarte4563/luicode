@@ -50,6 +50,7 @@ def test_cli_scripts_are_registered() -> None:
         "luicode-grok": "luicode.cli.launchers.grok:launch",
         "luicode-muse": "luicode.cli.launchers.muse:launch",
         "luicode-aider": "luicode.cli.launchers.aider:launch",
+        "luicode-jcode": "luicode.cli.launchers.jcode:launch",
     }
     assert pyproject["project"]["gui-scripts"] == {
         "luicode-desktop": "luicode.cli.desktop_entrypoint:launch",

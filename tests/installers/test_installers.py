@@ -26,6 +26,7 @@ LUICODE_COMMANDS = (
     "luicode-grok",
     "luicode-muse",
     "luicode-aider",
+    "luicode-jcode",
     "luicode-update",
     "luicode-upgrade",
     "luicode-init",

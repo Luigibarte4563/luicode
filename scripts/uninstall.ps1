@@ -24,6 +24,7 @@ $LuicodeCommands = @(
     "luicode-grok",
     "luicode-muse",
     "luicode-aider",
+    "luicode-jcode",
     "luicode-update",
     "luicode-init",
     "luicode"
@@ -36,7 +37,7 @@ function Show-Usage {
 Usage: uninstall.ps1 [options]
 
 Removes the luicode uv tool and deletes ~/.luicode/ after removal is verified.
-Does not remove uv, Claude Code, Codex, Pi, OpenCode, Cline, Hermes Agent, DeepSeek Harness, Grok Build, Muse Code, Aider, the uv-managed Python runtime, or shared PATH entries.
+Does not remove uv, Claude Code, Codex, Pi, OpenCode, Cline, Hermes Agent, DeepSeek Harness, Grok Build, Muse Code, Aider, jcode, the uv-managed Python runtime, or shared PATH entries.
 
 Options:
   -DryRun                Print commands without running them.

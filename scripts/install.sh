@@ -33,7 +33,7 @@ LUICODE_MACOS_BUNDLE_ID="com.luicode.desktop"
 LUICODE_MACOS_OWNER_FILE=".luicode-owner"
 # Include every entry point plus the retired `luicode-init` so updates reject
 # older LUICODE processes before replacement.
-LUICODE_COMMANDS="luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-update luicode-upgrade luicode-init luicode"
+LUICODE_COMMANDS="luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-jcode luicode-update luicode-upgrade luicode-init luicode"
 
 dry_run=0
 voice_local=0
@@ -349,6 +349,8 @@ coding_agent_display_name() {
 }
 
 coding_agent_catalog() {
+    # jcode is intentionally absent: LUICODE only launches it, never installs
+    # it, so there is no prompt to offer and no state to report.
     printf 'claude codex pi opencode cline dsh grok aider'
     if [ "$TERMUX" -eq 0 ]; then
         printf ' hermes muse'
@@ -2302,14 +2304,14 @@ configure_and_verify_luicode() {
 
     if [ "$dry_run" -eq 1 ]; then
         print_command uv tool dir --bin
-        printf '+ verify luicode-desktop, luicode-server, luicode-claude, luicode-codex, luicode-pi, luicode-opencode, luicode-cline, luicode-hermes, luicode-dsh, luicode-grok, luicode-muse, and luicode-aider in the uv tool bin directory\n'
+        printf '+ verify luicode-desktop, luicode-server, luicode-claude, luicode-codex, luicode-pi, luicode-opencode, luicode-cline, luicode-hermes, luicode-dsh, luicode-grok, luicode-muse, luicode-aider, and luicode-jcode in the uv tool bin directory\n'
         print_command luicode-server --version
         return 0
     fi
 
     add_uv_tool_bin_directory
 
-    for command_name in luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-update; do
+    for command_name in luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-jcode luicode-update; do
         [ -x "$tool_bin/$command_name" ] || fail "luicode installation did not create $tool_bin/$command_name."
     done
 
@@ -2554,4 +2556,5 @@ else
     else
         printf 'The luicode-aider wrapper is ready after you install Aider.\n'
     fi
+    printf 'The luicode-jcode wrapper is ready after you install jcode.\n'
 fi

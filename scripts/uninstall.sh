@@ -6,7 +6,7 @@ LUICODE_HOME_DIRNAME=".luicode"
 LUICODE_MACOS_BUNDLE_ID="com.luicode.desktop"
 LUICODE_MACOS_OWNER_FILE=".luicode-owner"
 # Include retired entry points so older installations are fully stopped and removed.
-LUICODE_COMMANDS="luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-update luicode-init luicode"
+LUICODE_COMMANDS="luicode-desktop luicode-server luicode-claude luicode-codex luicode-pi luicode-opencode luicode-cline luicode-hermes luicode-dsh luicode-grok luicode-muse luicode-aider luicode-jcode luicode-update luicode-init luicode"
 
 dry_run=0
 uv_tool_bin=""

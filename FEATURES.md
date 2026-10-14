@@ -10,7 +10,7 @@ LUICode is a **local gateway for agentic coding** that runs your favorite coding
 |-----------|-------------|
 | **luicode-server** | Single local gateway process (FastAPI + Uvicorn) |
 | **Admin UI** | Browser-based management at `http://127.0.0.1:8082/admin` |
-| **Launchers** | `luicode-claude`, `luicode-codex`, `luicode-pi`, `luicode-opencode`, `luicode-cline`, `luicode-hermes`, `luicode-dsh`, `luicode-grok`, `luicode-muse`, `luicode-aider`, `luicode-desktop` |
+| **Launchers** | `luicode-claude`, `luicode-codex`, `luicode-pi`, `luicode-opencode`, `luicode-cline`, `luicode-hermes`, `luicode-dsh`, `luicode-grok`, `luicode-muse`, `luicode-aider`, `luicode-jcode`, `luicode-desktop` |
 | **Protocol Adapters** | Anthropic Messages, OpenAI Responses, OpenAI Chat Completions |
 | **Loopback-only** | Admin UI binds to `127.0.0.1` / `::1` — no external access |
 
@@ -232,7 +232,7 @@ async def my_handler(browser_tools: BrowserToolsPort):
 
 ---
 
-## Supported Coding Agents (11)
+## Supported Coding Agents (12)
 
 | Agent | Launcher | Notes | Android/Termux |
 |-------|----------|-------|----------------|
@@ -246,7 +246,16 @@ async def my_handler(browser_tools: BrowserToolsPort):
 | **Grok Build** | `luicode-grok` | xAI | ✅ Supported |
 | **Muse Code** | `luicode-muse` | Meta | ❌ No Android support |
 | **Aider** | `luicode-aider` | Terminal-based | ✅ Supported |
+| **jcode** | `luicode-jcode` | Rust TUI, Anthropic-compatible profile | ✅ Supported with `pkg install glibc patchelf` |
 | **Desktop** | `luicode-desktop` | GUI launcher | ✅ Supported |
+
+---
+
+### jcode notes
+
+- **Profile isolation**: `luicode-jcode` writes a LUICODE-specific provider profile into `~/.luicode/jcode-home/config.toml` via `JCODE_HOME`. The user's native `~/.jcode/` config, sessions, MCP servers, and OAuth logins are never touched.
+- **Swarm concurrency**: jcode's swarm can run many headless sessions. Each routed request shares `PROVIDER_MAX_CONCURRENCY` (default 8) and `PROVIDER_RATE_LIMIT` slots. Queued/throttled requests are visible in Provider Health.
+- **Browser tool**: jcode includes a built-in `browser` tool via Firefox Agent Bridge, independent of LUICODE's CDP-based browser extra. They do not share state or sessions.
 
 ---
 

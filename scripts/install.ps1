@@ -76,6 +76,7 @@ $LuicodeCommands = @(
     "luicode-grok",
     "luicode-muse",
     "luicode-aider",
+    "luicode-jcode",
     "luicode-update",
     "luicode-upgrade",
     "luicode-init",
@@ -1977,7 +1978,7 @@ function Configure-AndConfirmLuicode {
     if ($DryRun) {
         Write-Host "+ uv tool update-shell"
         Write-Host "+ uv tool dir --bin"
-        Write-Host "+ verify luicode-desktop, luicode-server, luicode-claude, luicode-codex, luicode-pi, luicode-opencode, luicode-cline, luicode-hermes, luicode-dsh, luicode-grok, luicode-muse, and luicode-aider in the uv tool bin directory"
+        Write-Host "+ verify luicode-desktop, luicode-server, luicode-claude, luicode-codex, luicode-pi, luicode-opencode, luicode-cline, luicode-hermes, luicode-dsh, luicode-grok, luicode-muse, luicode-aider, and luicode-jcode in the uv tool bin directory"
         Write-Host "+ luicode-server --version"
         Export-LuicodeDesktopIcon `
             -DesktopCommand "<uv-tool-bin>\luicode-desktop.exe" `
@@ -1999,7 +2000,7 @@ function Configure-AndConfirmLuicode {
         [IO.Path]::AltDirectorySeparatorChar
     )
     $installedCommands = @{}
-    foreach ($commandName in @("luicode-desktop", "luicode-server", "luicode-claude", "luicode-codex", "luicode-pi", "luicode-opencode", "luicode-cline", "luicode-hermes", "luicode-dsh", "luicode-grok", "luicode-muse", "luicode-aider", "luicode-update.cmd")) {
+    foreach ($commandName in @("luicode-desktop", "luicode-server", "luicode-claude", "luicode-codex", "luicode-pi", "luicode-opencode", "luicode-cline", "luicode-hermes", "luicode-dsh", "luicode-grok", "luicode-muse", "luicode-aider", "luicode-jcode", "luicode-update.cmd")) {
         $command = Get-ApplicationCommand $commandName
         if (-not $command) {
             throw "luicode installation did not create '$commandName'."
@@ -2203,4 +2204,5 @@ else {
     else {
         Write-Host "The luicode-aider wrapper is ready after you install Aider."
     }
+    Write-Host "The luicode-jcode wrapper is ready after you install jcode."
 }

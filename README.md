@@ -184,6 +184,7 @@ Start `luicode-server` first, then run the matching launcher in your terminal.
 | Grok Build             | `luicode-grok`     |
 | Muse Code              | `luicode-muse`     |
 | Aider                  | `luicode-aider`    |
+| jcode                  | `luicode-jcode`    |
 
 ### OpenCode notes
 

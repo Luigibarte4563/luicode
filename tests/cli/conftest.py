@@ -53,6 +53,7 @@ class LaunchCapture:
             "dsh": "0.1.0-rc.8",
             "grok": '{"currentVersion":"1.0.5"}',
             "muse": "Muse Code 1.0.3 (1.0.3-R2198.1)",
+            "jcode": "jcode v0.95.0 (6487bbd7e)",
         }
     )
 
@@ -100,8 +101,14 @@ class LaunchCapture:
 
 
 @pytest.fixture
-def launch_capture(monkeypatch: pytest.MonkeyPatch) -> LaunchCapture:
+def launch_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> LaunchCapture:
     from luicode.cli.launchers import common
+
+    # Launchers resolve their owned homes from the user's home directory, and
+    # the jcode launcher writes a persistent config there. Keep every test's
+    # home inside tmp_path so a run never rewrites real user state.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     capture = LaunchCapture()
     store = ManagedConfigStore()

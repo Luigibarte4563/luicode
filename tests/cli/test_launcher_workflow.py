@@ -24,6 +24,7 @@ HARNESSES = (
     "grok",
     "muse",
     "aider",
+    "jcode",
 )
 
 
@@ -35,7 +36,7 @@ def launch(name: str, args: list[str], exit_code: int = 23) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["aider", "cline", "dsh", "grok", "hermes", "muse", "opencode"]
+    "name", ["aider", "cline", "dsh", "grok", "hermes", "muse", "opencode", "jcode"]
 )
 def test_launch_default_is_server_selection_not_first_row_or_local_settings(
     name: str,
@@ -90,6 +91,19 @@ def test_launch_default_is_server_selection_not_first_row_or_local_settings(
                 registry["providers"]["openai-native"]["provider"]["defaultModelId"]
                 == selected
             )
+        elif name == "jcode":
+            assert env["LUICODE_JCODE_TOKEN"] == "launcher-test-token"
+            raw = (Path(env["JCODE_HOME"]) / "config.toml").read_text(encoding="utf-8")
+            # The gateway token reaches jcode only through the child process
+            # environment; it must never be written to the profile on disk.
+            assert "launcher-test-token" not in raw
+            config = tomllib.loads(raw)
+            assert config["provider"]["default_model"] == selected
+            assert config["providers"]["luicode"]["default_model"] == selected
+            assert any(
+                model["id"] == selected
+                for model in config["providers"]["luicode"]["models"]
+            )
         else:
             rows = json.loads(Path(command[command.index("--patch") + 1]).read_text())
             assert (
@@ -116,7 +130,7 @@ def test_help_receives_normal_luicode_setup(
     if name in {"claude", "pi"}:
         assert len(launch_capture.requests) == 1
     else:
-        view = "messages" if name == "aider" else "responses"
+        view = "messages" if name in {"aider", "jcode"} else "responses"
         assert [request.full_url for request in launch_capture.requests] == [
             "http://127.0.0.1:8182/health",
             f"http://127.0.0.1:8182/v1/models?view={view}",
