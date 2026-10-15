@@ -1098,7 +1098,7 @@ def test_install_sh_reports_working_existing_agents_with_versions(
         "Claude Code\n  ok found and working\n  Version: claude 1.0.0" in result.stdout
     )
     assert "Cline CLI\n  ok found and working\n  Version: cline 3.0.55" in result.stdout
-    assert "Working: 10" in result.stdout
+    assert "Working: 11" in result.stdout
     assert "Broken: 0" in result.stdout
     assert "Not installed: 0" in result.stdout
     assert (
@@ -1130,7 +1130,7 @@ def test_install_sh_continues_when_broken_launcher_is_declined(
     assert "Broken: 1" in result.stdout
     # The harness preinstalls OpenCode; every other agent is absent.
     assert "Working: 1" in result.stdout
-    assert "Not installed: 8" in result.stdout
+    assert "Not installed: 9" in result.stdout
     assert (posix_harness.bin_dir / "cline").read_bytes() == launcher
     calls = posix_harness.calls()
     assert "cline:--version" in calls
@@ -1169,7 +1169,7 @@ def test_install_sh_terminates_after_reporting_working_agents(
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.count("Enable RTK token optimization") == 1
     assert "Please answer Y or N." not in result.stdout
-    assert "Working: 10" in result.stdout
+    assert "Working: 11" in result.stdout
     assert "luicode is installed and verified." in result.stdout
 
 
@@ -1188,7 +1188,7 @@ def test_install_sh_report_lists_each_agent_in_its_own_state(
     # The harness already provides OpenCode; Aider was removed for this case.
     assert "Working: 2" in result.stdout
     assert "Broken: 1" in result.stdout
-    assert "Not installed: 7" in result.stdout
+    assert "Not installed: 8" in result.stdout
 
 
 def test_install_sh_dry_run_does_not_probe_broken_launchers(
@@ -3357,7 +3357,7 @@ def test_install_ps1_reports_working_existing_agents_with_versions(
         "Claude Code\n  ok found and working\n  Version: claude 1.0.0" in result.stdout
     )
     assert "Cline CLI\n  ok found and working\n  Version: cline 3.0.55" in result.stdout
-    assert "Working: 10" in result.stdout
+    assert "Working: 11" in result.stdout
     assert "Broken: 0" in result.stdout
     assert "Not installed: 0" in result.stdout
     assert not any(
@@ -4114,7 +4114,7 @@ def test_install_ps1_checks_existing_aider_in_custom_uv_tool_bin_before_installi
     original = existing_aider.read_bytes()
 
     result = (
-        powershell_harness.run_interactive(["n"] * 9, fail_step=fail_step)
+        powershell_harness.run_interactive(["n"] * 10, fail_step=fail_step)
         if interactive
         else powershell_harness.run_functions(
             "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Aider", fail_step=fail_step
@@ -5117,6 +5117,7 @@ $script:InstallDsh = $true
 $script:InstallGrok = $true
 $script:InstallMuse = $true
 $script:InstallAider = $true
+$script:InstallJcode = $false
 $script:EnableRtk = $false
 function Read-Host {{
     param([string] $Prompt)
@@ -5160,6 +5161,7 @@ $script:InstallDsh = $false
 $script:InstallGrok = $false
 $script:InstallMuse = $false
 $script:InstallAider = $false
+$script:InstallJcode = $false
 $script:PiAvailable = $false
 $script:MuseAvailable = $false
 $script:Calls = @()
@@ -5209,6 +5211,7 @@ $script:InstallDsh = $false
 $script:InstallGrok = $false
 $script:InstallMuse = $false
 $script:InstallAider = $false
+$script:InstallJcode = $false
 $script:PiAvailable = $false
 $script:MuseAvailable = $false
 $script:Calls = @()
@@ -5250,6 +5253,7 @@ $script:InstallDsh = $false
 $script:InstallGrok = $false
 $script:InstallMuse = $false
 $script:InstallAider = $false
+$script:InstallJcode = $false
 $script:PiAvailable = $false
 $script:MuseAvailable = $false
 function Write-Step {{ param([string] $Message) }}
