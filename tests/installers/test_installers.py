@@ -3541,7 +3541,7 @@ def test_install_ps1_discovery_preserves_existing_command_priority(
     candidate = _prepare_discovery_collision(powershell_harness, discovery, command)
 
     result = powershell_harness.run_interactive(
-        ["n"] * 11, fail_step=f"stale-{command}-verify"
+        ["n"] * 8, fail_step=f"stale-{command}-verify"
     )
 
     assert result.returncode == 0, result.stderr
