@@ -1311,7 +1311,7 @@ def test_install_sh_installs_selected_hermes_without_setup(
     posix_harness: PosixHarness,
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
-    result = posix_harness.run_interactive("n\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\n")
+    result = posix_harness.run_interactive("n\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\nn\n")
 
     assert result.returncode == 0, result.stdout
     calls = posix_harness.calls()
@@ -1332,7 +1332,7 @@ def test_install_sh_stops_when_selected_hermes_install_fails(
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
     result = posix_harness.run_interactive(
-        "n\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\n", fail_step=failure
+        "n\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\nn\n", fail_step=failure
     )
 
     assert result.returncode != 0
@@ -1347,7 +1347,7 @@ def test_install_sh_rejects_unsupported_hermes_platform_before_download(
     posix_harness.env["FAKE_UNAME"] = "Darwin"
     posix_harness.env["FAKE_UNAME_MACHINE"] = "x86_64"
 
-    result = posix_harness.run_interactive("n\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\n")
+    result = posix_harness.run_interactive("n\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\nn\n")
 
     assert result.returncode != 0
     assert "does not provide a supported release for Darwin x86_64" in result.stdout
@@ -1394,7 +1394,7 @@ def test_install_sh_stops_when_grok_install_fails(
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
     result = posix_harness.run_interactive(
-        "n\nn\nn\nn\nn\nn\nn\ny\nn\nn\nn\n", fail_step=failure
+        "n\nn\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\n", fail_step=failure
     )
 
     assert result.returncode != 0
@@ -1409,7 +1409,7 @@ def test_install_sh_stops_when_muse_install_fails(
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
     result = posix_harness.run_interactive(
-        "n\nn\nn\nn\nn\nn\nn\nn\ny\nn\nn\n", fail_step=failure
+        "n\nn\nn\nn\nn\nn\nn\nn\ny\nn\nn\nn\n", fail_step=failure
     )
 
     assert result.returncode != 0
@@ -1422,7 +1422,7 @@ def test_install_sh_stops_when_aider_install_fails(
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
     result = posix_harness.run_interactive(
-        "n\nn\nn\nn\nn\nn\nn\nn\nn\ny\nn\n", fail_step="aider-install"
+        "n\nn\nn\nn\nn\nn\nn\nn\nn\ny\nn\nn\n", fail_step="aider-install"
     )
 
     assert result.returncode != 0
@@ -1440,7 +1440,7 @@ def test_install_sh_accepts_aider_as_the_only_selected_agent(
     posix_harness: PosixHarness,
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
-    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\nn\nn\nn\ny\nn\n")
+    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\nn\nn\nn\ny\nn\nn\n")
 
     assert result.returncode == 0, result.stdout
     calls = posix_harness.calls()
@@ -1461,7 +1461,7 @@ def test_install_sh_discovers_aider_in_custom_uv_tool_bin(
     custom_tool_bin = posix_harness.root / "custom-tool-bin"
     posix_harness.env["UV_TOOL_BIN_DIR"] = str(custom_tool_bin)
 
-    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\nn\nn\nn\ny\nn\n")
+    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\nn\nn\nn\ny\nn\nn\n")
 
     assert result.returncode == 0, result.stderr
     assert (custom_tool_bin / "aider").is_file()
@@ -1540,7 +1540,7 @@ def test_install_sh_installs_selected_dsh_at_exact_preview(
     posix_harness: PosixHarness,
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
-    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\n")
+    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\n")
 
     assert result.returncode == 0, result.stdout
     calls = posix_harness.calls()
@@ -1600,7 +1600,7 @@ def test_install_sh_rejects_incompatible_node_for_selected_dsh(
         _posix_command("node").replace("node 22.19.0", f"node {node_version}"),
     )
 
-    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\n")
+    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\n")
 
     assert result.returncode != 0
     assert "luicode is installed and verified." not in result.stdout
@@ -1628,7 +1628,7 @@ def test_install_sh_stops_when_selected_dsh_install_fails(
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
     result = posix_harness.run_interactive(
-        "n\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\n", fail_step="dsh-install"
+        "n\nn\nn\nn\nn\nn\ny\nn\nn\nn\nn\nn\n", fail_step="dsh-install"
     )
 
     assert result.returncode != 0
@@ -1771,7 +1771,7 @@ def test_install_sh_reprompts_then_installs_only_selected_agent(
     posix_harness: PosixHarness,
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
-    result = posix_harness.run_interactive("n\n" * 11 + "y\n" + "n\n" * 10)
+    result = posix_harness.run_interactive("n\n" * 12 + "y\n" + "n\n" * 10)
 
     assert result.returncode == 0, result.stdout
     assert "Select at least one coding agent." in result.stdout
@@ -1792,7 +1792,7 @@ def test_install_sh_rejects_uninstalled_only_selection(
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
     result = posix_harness.run_interactive(
-        "n\nn\ny\nn\nn\nn\nn\nn\nn\nn\nn\n", fail_step="pi-skip"
+        "n\nn\ny\nn\nn\nn\nn\nn\nn\nn\nn\nn\n", fail_step="pi-skip"
     )
 
     assert result.returncode != 0
@@ -2091,7 +2091,7 @@ def test_install_sh_infers_home_for_replacement_uv(
     if cargo_layout:
         posix_harness.env["UV_INSTALL_DIR"] = str(inferred_home / ".cargo")
 
-    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\nn\nn\nn\ny\nn\n")
+    result = posix_harness.run_interactive("n\nn\nn\nn\nn\nn\nn\nn\nn\ny\nn\nn\n")
 
     assert result.returncode == 0, result.stderr
     relative_uv = Path(".cargo/bin/uv") if cargo_layout else Path(".local/bin/uv")
