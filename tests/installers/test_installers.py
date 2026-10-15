@@ -44,6 +44,7 @@ CODING_AGENTS = (
     "grok",
     "muse",
     "aider",
+    "jcode",
 )
 
 
@@ -452,7 +453,7 @@ while [ "$#" -gt 0 ]; do
 done
 echo "download:$url" >> "$CALL_LOG"
 case "$url:$FAIL_STEP" in
-    *claude.ai*:claude-download|*chatgpt.com*:codex-download|*pi.dev*:pi-download|*opencode.ai*:opencode-download|*hermes-agent.nousresearch.com*:hermes-download|*x.ai*:grok-download|*dev.meta.ai*:muse-download|*rtk-ai*:rtk-download|*astral.sh*:uv-download)
+    *claude.ai*:claude-download|*chatgpt.com*:codex-download|*pi.dev*:pi-download|*opencode.ai*:opencode-download|*hermes-agent.nousresearch.com*:hermes-download|*x.ai*:grok-download|*dev.meta.ai*:muse-download|*jcode.sh*:jcode-download|*rtk-ai*:rtk-download|*astral.sh*:uv-download)
         exit 41
         ;;
 esac
@@ -469,6 +470,7 @@ case "$url" in
     *hermes-agent.nousresearch.com*) source="$FAKE_FIXTURES/hermes-installer.sh" ;;
     *x.ai*) source="$FAKE_FIXTURES/grok-installer.sh" ;;
     *dev.meta.ai*) source="$FAKE_FIXTURES/muse-installer.sh" ;;
+    *jcode.sh*) source="$FAKE_FIXTURES/jcode-installer.sh" ;;
     *rtk-ai*)
         if [ "$FAIL_STEP" = "rtk-install" ]; then
             printf 'invalid archive\n' > "$output"
@@ -563,6 +565,16 @@ chmod +x "$HOME/.local/bin/muse"
 """,
     )
     _write_executable(
+        fixtures / "jcode-installer.sh",
+        """#!/bin/sh
+echo "jcode-install" >> "$CALL_LOG"
+[ "$FAIL_STEP" = "jcode-install" ] && exit 30
+mkdir -p "$HOME/.local/bin"
+cp "$FAKE_FIXTURES/jcode-command.sh" "$HOME/.local/bin/jcode"
+chmod +x "$HOME/.local/bin/jcode"
+""",
+    )
+    _write_executable(
         fixtures / "uv-installer.sh",
         """#!/bin/sh
 echo "uv-install" >> "$CALL_LOG"
@@ -608,6 +620,7 @@ chmod +x "$uv_bin/uv"
     _write_executable(fixtures / "grok-command.sh", _posix_command("grok"))
     _write_executable(fixtures / "muse-command.sh", _posix_command("muse"))
     _write_executable(fixtures / "aider-command.sh", _posix_command("aider"))
+    _write_executable(fixtures / "jcode-command.sh", _posix_command("jcode"))
     rtk_command = _posix_rtk_command().encode()
     with tarfile.open(
         fixtures / "rtk-x86_64-unknown-linux-musl.tar.gz", "w:gz"
@@ -978,7 +991,7 @@ def test_install_sh_asks_only_about_missing_harnesses(
         posix_harness.add_rtk()
 
     result = posix_harness.run_interactive(
-        ("y\n" if install_codex else "n\n") + "n\n" * (7 if rtk else 8)
+        ("y\n" if install_codex else "n\n") + "n\n" * (8 if rtk else 9)
     )
 
     assert result.returncode == 0, result.stdout
@@ -991,6 +1004,7 @@ def test_install_sh_asks_only_about_missing_harnesses(
         "grok",
         "muse",
         "aider",
+        "jcode",
     ]
     calls = posix_harness.calls()
     assert "claude:--version" in calls
@@ -1013,7 +1027,7 @@ def test_install_sh_discovers_installed_npm_harnesses_before_questions(
     for command in ("pi", "cline", "dsh"):
         _write_executable(prefix / "bin" / command, _posix_command(command))
 
-    result = posix_harness.run_interactive("n\n" * 7)
+    result = posix_harness.run_interactive("n\n" * 8)
 
     assert result.returncode == 0, result.stdout
     assert re.findall(r"for luicode-(\w+)\?", result.stdout) == [
@@ -1023,6 +1037,7 @@ def test_install_sh_discovers_installed_npm_harnesses_before_questions(
         "grok",
         "muse",
         "aider",
+        "jcode",
     ]
     calls = posix_harness.calls()
     assert "pi-install" not in calls
@@ -1042,7 +1057,7 @@ def test_install_sh_discovers_installed_aider_without_uv(
     )
     _write_executable(tool_bin / "aider", _posix_command("aider"))
 
-    result = posix_harness.run_interactive("n\n" * 9)
+    result = posix_harness.run_interactive("n\n" * 10)
 
     assert result.returncode == 0, result.stdout
     assert "for luicode-aider?" not in result.stdout
@@ -1055,7 +1070,7 @@ def test_install_sh_discovers_installed_aider_without_uv(
 def test_install_sh_asks_about_unrelated_pi(posix_harness: PosixHarness) -> None:
     posix_harness.add_unrelated_pi()
 
-    result = posix_harness.run_interactive("n\n" * 10)
+    result = posix_harness.run_interactive("n\n" * 11)
 
     assert result.returncode == 0, result.stdout
     assert "found but is not the expected application" in result.stdout
@@ -1103,7 +1118,7 @@ def test_install_sh_continues_when_broken_launcher_is_declined(
     )
     launcher = (posix_harness.bin_dir / "cline").read_bytes()
 
-    result = posix_harness.run_interactive("n\n" * 10)
+    result = posix_harness.run_interactive("n\n" * 11)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "luicode is installed and verified." in result.stdout
@@ -1127,7 +1142,7 @@ def test_install_sh_broken_launcher_does_not_abort_the_installation(
 ) -> None:
     posix_harness.add_broken_client("codex")
 
-    result = posix_harness.run_interactive("n\n" * 10)
+    result = posix_harness.run_interactive("n\n" * 11)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "luicode is installed and verified." in result.stdout
@@ -1165,7 +1180,7 @@ def test_install_sh_report_lists_each_agent_in_its_own_state(
     posix_harness.add_broken_client("codex")
     (posix_harness.bin_dir / "aider").unlink(missing_ok=True)
 
-    result = posix_harness.run_interactive("n\n" * 10)
+    result = posix_harness.run_interactive("n\n" * 11)
 
     assert result.returncode == 0, result.stdout
     assert "Claude Code\n  ok found and working" in result.stdout
@@ -1209,7 +1224,7 @@ def test_install_sh_failed_npm_discovery_does_not_block_selection(
         '#!/bin/sh\necho "npm:$*" >> "$CALL_LOG"\nexit 72\n',
     )
 
-    result = posix_harness.run_interactive("n\n" * 10)
+    result = posix_harness.run_interactive("n\n" * 11)
 
     assert result.returncode == 0, result.stdout
     assert "opencode:--version" in posix_harness.calls()
@@ -1224,7 +1239,7 @@ def test_install_sh_does_not_use_uv_install_directory_for_aider(
     posix_harness.env[variable] = str(uv_bin)
     _write_executable(uv_bin / "aider", _posix_command("aider"))
 
-    result = posix_harness.run_interactive("n\n" * 10)
+    result = posix_harness.run_interactive("n\n" * 11)
 
     assert result.returncode == 0, result.stdout
     assert "Install Aider for luicode-aider?" in result.stdout
@@ -1467,7 +1482,7 @@ def test_install_sh_checks_existing_aider_in_custom_uv_tool_bin_before_installin
     )
     original = existing_aider.read_bytes()
 
-    result = posix_harness.run_interactive("n\n" * 9)
+    result = posix_harness.run_interactive("n\n" * 10)
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = posix_harness.calls()
@@ -1490,7 +1505,7 @@ def test_install_sh_continues_when_broken_custom_tool_bin_aider_is_declined(
     )
     original = existing_aider.read_bytes()
 
-    result = posix_harness.run_interactive("n\n" * 10)
+    result = posix_harness.run_interactive("n\n" * 11)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "luicode is installed and verified." in result.stdout
@@ -1512,7 +1527,7 @@ def test_install_sh_rejects_broken_selected_aider_without_replacing_it(
     # A working agent is never prompted for, and the harness already provides
     # OpenCode, so Aider is the ninth prompt rather than the tenth.
     result = posix_harness.run_interactive(
-        "n\n" * 8 + "y\n" + "n\n", fail_step="aider-verify"
+        "n\n" * 8 + "y\n" + "n\n" * 2, fail_step="aider-verify"
     )
 
     assert result.returncode != 0
@@ -1548,7 +1563,9 @@ def test_install_sh_replaces_mismatched_dsh_preview(
     )
 
     result = (
-        posix_harness.run_interactive("n\n" * 9) if interactive else posix_harness.run()
+        posix_harness.run_interactive("n\n" * 10)
+        if interactive
+        else posix_harness.run()
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1754,7 +1771,7 @@ def test_install_sh_reprompts_then_installs_only_selected_agent(
     posix_harness: PosixHarness,
 ) -> None:
     (posix_harness.bin_dir / "opencode").unlink()
-    result = posix_harness.run_interactive("n\n" * 11 + "y\n" + "n\n" * 9)
+    result = posix_harness.run_interactive("n\n" * 11 + "y\n" + "n\n" * 10)
 
     assert result.returncode == 0, result.stdout
     assert "Select at least one coding agent." in result.stdout
@@ -1898,7 +1915,7 @@ def test_install_sh_replaces_unrelated_pi_command(
     posix_harness.add_uv("0.12.13")
 
     result = (
-        posix_harness.run_interactive("y\n" + "n\n" * 7)
+        posix_harness.run_interactive("y\n" + "n\n" * 8)
         if interactive
         else posix_harness.run()
     )
@@ -2744,6 +2761,9 @@ def powershell_harness(
     (fixtures / "aider-command.cmd").write_text(
         _batch_client("aider"), encoding="utf-8"
     )
+    (fixtures / "jcode-command.cmd").write_text(
+        _batch_client("jcode"), encoding="utf-8"
+    )
     (fixtures / "rtk-command.cmd").write_text(_batch_rtk(), encoding="utf-8")
     (fixtures / "uv-command.cmd").write_text(_batch_uv("0.12.13"), encoding="utf-8")
     (fixtures / "luicode-command.cmd").write_text(
@@ -2830,6 +2850,15 @@ $bin = Join-Path $env:LOCALAPPDATA "Programs\Muse Code\bin"
 New-Item -ItemType Directory -Force -Path $bin | Out-Null
 Copy-Item (Join-Path $env:FAKE_FIXTURES "muse-command.cmd") (Join-Path $bin "muse.cmd") -Force
 Add-Content -LiteralPath $env:CALL_LOG -Value "muse-install"
+""",
+        encoding="utf-8",
+    )
+    (fixtures / "jcode-installer.ps1").write_text(
+        r"""if ($env:FAIL_STEP -eq "jcode-install") { exit 69 }
+$bin = Join-Path $env:LOCALAPPDATA "jcode\bin"
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+Copy-Item (Join-Path $env:FAKE_FIXTURES "jcode-command.cmd") (Join-Path $bin "jcode.cmd") -Force
+Add-Content -LiteralPath $env:CALL_LOG -Value "jcode-install"
 """,
         encoding="utf-8",
     )
@@ -2929,6 +2958,9 @@ function Invoke-RestMethod {
     }
     elseif ($Uri.Contains("scripts/install-muse.ps1")) {
         $source = Join-Path $env:FAKE_FIXTURES "muse-installer.ps1"
+    }
+    elseif ($Uri.Contains("jcode.sh")) {
+        $source = Join-Path $env:FAKE_FIXTURES "jcode-installer.ps1"
     }
     elseif ($Uri.Contains("opencode-windows-")) {
         if ($env:FAIL_STEP -eq "opencode-archive") {
@@ -3341,7 +3373,7 @@ def test_install_ps1_continues_when_broken_cmd_launcher_is_declined(
     )
     launcher = (powershell_harness.bin_dir / "cline.cmd").read_bytes()
 
-    result = powershell_harness.run_interactive(["n"] * 10)
+    result = powershell_harness.run_interactive(["n"] * 11)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "luicode is installed and verified." in result.stdout
@@ -3362,7 +3394,7 @@ def test_install_ps1_broken_cmd_launcher_does_not_abort_the_installation(
 ) -> None:
     powershell_harness.add_broken_client("codex")
 
-    result = powershell_harness.run_interactive(["n"] * 10)
+    result = powershell_harness.run_interactive(["n"] * 11)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "luicode is installed and verified." in result.stdout
@@ -3379,7 +3411,7 @@ def test_install_ps1_report_lists_each_agent_in_its_own_state(
     powershell_harness.add_broken_client("codex")
     (powershell_harness.bin_dir / "aider.cmd").unlink(missing_ok=True)
 
-    result = powershell_harness.run_interactive(["n"] * 10)
+    result = powershell_harness.run_interactive(["n"] * 11)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Claude Code\n  ok found and working" in result.stdout
@@ -3397,7 +3429,7 @@ def test_install_ps1_asks_only_about_missing_harnesses(
         powershell_harness.add_rtk()
 
     result = powershell_harness.run_interactive(
-        ["y" if install_codex else "n"] + ["n"] * (7 if rtk else 8)
+        ["y" if install_codex else "n"] + ["n"] * (8 if rtk else 9)
     )
 
     assert result.returncode == 0, result.stderr
@@ -3410,6 +3442,7 @@ def test_install_ps1_asks_only_about_missing_harnesses(
         "grok",
         "muse",
         "aider",
+        "jcode",
     ]
     calls = powershell_harness.calls()
     assert "claude:--version" in calls
@@ -3432,7 +3465,7 @@ def test_install_ps1_discovers_installed_npm_harnesses_before_questions(
     for command in ("pi", "cline", "dsh"):
         _write_executable(prefix / f"{command}.cmd", _batch_client(command))
 
-    result = powershell_harness.run_interactive(["n"] * 7)
+    result = powershell_harness.run_interactive(["n"] * 8)
 
     assert result.returncode == 0, result.stderr
     assert re.findall(r"for luicode-(\w+)\?", result.stdout) == [
@@ -3442,6 +3475,7 @@ def test_install_ps1_discovers_installed_npm_harnesses_before_questions(
         "grok",
         "muse",
         "aider",
+        "jcode",
     ]
     calls = powershell_harness.calls()
     assert "pi-install" not in calls
@@ -3486,7 +3520,7 @@ def test_install_sh_discovery_preserves_existing_command_priority(
     candidate = _prepare_discovery_collision(posix_harness, discovery, command)
 
     result = posix_harness.run_interactive(
-        "n\n" * 7, fail_step=f"stale-{command}-verify"
+        "n\n" * 8, fail_step=f"stale-{command}-verify"
     )
 
     assert result.returncode == 0, result.stdout
@@ -3507,7 +3541,7 @@ def test_install_ps1_discovery_preserves_existing_command_priority(
     candidate = _prepare_discovery_collision(powershell_harness, discovery, command)
 
     result = powershell_harness.run_interactive(
-        ["n"] * 7, fail_step=f"stale-{command}-verify"
+        ["n"] * 11, fail_step=f"stale-{command}-verify"
     )
 
     assert result.returncode == 0, result.stderr
@@ -3606,7 +3640,7 @@ def test_install_ps1_verifies_new_luicode_after_custom_tool_discovery(
         _batch_client("stale-luicode"),
     )
 
-    result = powershell_harness.run_interactive(["n"] * 10)
+    result = powershell_harness.run_interactive(["n"] * 11)
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = powershell_harness.calls()
@@ -3766,7 +3800,7 @@ def test_install_ps1_discovers_installed_aider_without_uv(
     )
     _write_executable(tool_bin / "aider.cmd", _batch_client("aider"))
 
-    result = powershell_harness.run_interactive(["n"] * 9)
+    result = powershell_harness.run_interactive(["n"] * 10)
 
     assert result.returncode == 0, result.stderr
     assert "for luicode-aider?" not in result.stdout
@@ -3781,7 +3815,7 @@ def test_install_ps1_asks_about_unrelated_pi(
 ) -> None:
     powershell_harness.add_unrelated_pi()
 
-    result = powershell_harness.run_interactive(["n"] * 10)
+    result = powershell_harness.run_interactive(["n"] * 11)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "found but is not the expected application" in result.stdout
@@ -3801,7 +3835,7 @@ def test_install_ps1_discovers_muse_from_user_path(
     _write_executable(user_bin / "codex.cmd", _batch_client("wrong-codex"))
     powershell_harness.env["LUICODE_TEST_USER_PATH"] = str(user_bin)
 
-    result = powershell_harness.run_interactive(["n"] * 8)
+    result = powershell_harness.run_interactive(["n"] * 9)
 
     assert result.returncode == 0, result.stderr
     assert "for luicode-muse?" not in result.stdout
@@ -3833,7 +3867,7 @@ def test_install_ps1_failed_npm_discovery_does_not_block_selection(
         '@echo off\necho npm:%*>>"%CALL_LOG%"\nexit /b 72\n',
     )
 
-    result = powershell_harness.run_interactive(["n"] * 10)
+    result = powershell_harness.run_interactive(["n"] * 11)
 
     assert result.returncode == 0, result.stderr
     assert "opencode:--version" in powershell_harness.calls()
@@ -3848,7 +3882,7 @@ def test_install_ps1_does_not_use_uv_install_directory_for_aider(
     powershell_harness.env[variable] = str(uv_bin)
     _write_executable(uv_bin / "aider.cmd", _batch_client("aider"))
 
-    result = powershell_harness.run_interactive(["n"] * 10)
+    result = powershell_harness.run_interactive(["n"] * 11)
 
     assert result.returncode == 0, result.stderr
     assert "Install Aider for luicode-aider?" in result.stdout
@@ -4147,7 +4181,7 @@ def test_install_ps1_replaces_mismatched_dsh_preview(
     )
 
     result = (
-        powershell_harness.run_interactive(["n"] * 9)
+        powershell_harness.run_interactive(["n"] * 10)
         if interactive
         else powershell_harness.run_functions(
             "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Dsh"
@@ -4473,7 +4507,7 @@ def test_install_ps1_replaces_unrelated_pi_command(
     powershell_harness.add_uv("0.12.13")
 
     result = (
-        powershell_harness.run_interactive(["y"] + ["n"] * 7)
+        powershell_harness.run_interactive(["y"] + ["n"] * 8)
         if interactive
         else powershell_harness.run_functions(
             "Add-KnownBinDirectories\nEnsure-Uv\nEnsure-Pi"
@@ -5567,9 +5601,9 @@ def _assert_external_opencode_is_not_shadowed(
     original = native.read_bytes()
     if interactive:
         result = (
-            harness.run_interactive(["n"] * 10)
+            harness.run_interactive(["n"] * 11)
             if isinstance(harness, PowerShellHarness)
-            else harness.run_interactive("n\n" * 10)
+            else harness.run_interactive("n\n" * 11)
         )
         assert "for luicode-opencode?" not in result.stdout
     else:

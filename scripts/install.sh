@@ -26,6 +26,7 @@ DSH_VERSION="0.1.0-rc.8"
 DSH_PACKAGE="@deepseek-ai/dsh@$DSH_VERSION"
 GROK_INSTALL_URL="https://x.ai/cli/install.sh"
 MUSE_INSTALL_URL="https://dev.meta.ai/install.sh"
+JCODE_INSTALL_URL="https://jcode.sh/install"
 RTK_VERSION="0.44.2"
 RTK_RELEASE_BASE_URL="https://github.com/rtk-ai/rtk/releases/download/v$RTK_VERSION"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
@@ -48,6 +49,9 @@ install_dsh=1
 install_grok=1
 install_muse=1
 install_aider=1
+# jcode defaults to no: installing it fetches a third-party script, so the
+# user opts in rather than having it happen as a side effect of updating.
+install_jcode=0
 enable_rtk=0
 torch_backend=""
 temporary_file=""
@@ -349,9 +353,7 @@ coding_agent_display_name() {
 }
 
 coding_agent_catalog() {
-    # jcode is intentionally absent: LUICODE only launches it, never installs
-    # it, so there is no prompt to offer and no state to report.
-    printf 'claude codex pi opencode cline dsh grok aider'
+    printf 'claude codex pi opencode cline dsh grok aider jcode'
     if [ "$TERMUX" -eq 0 ]; then
         printf ' hermes muse'
     fi
@@ -380,6 +382,7 @@ print_coding_agent_report() {
             grok) detected_grok=$agent_state ;;
             muse) detected_muse=$agent_state ;;
             aider) detected_aider=$agent_state ;;
+            jcode) detected_jcode=$agent_state ;;
         esac
         if [ "$agent_state" = NotInstalled ]; then
             report_missing=$((report_missing + 1))
@@ -489,6 +492,7 @@ choose_coding_agents() {
             grok) printf '%s' "$detected_grok" ;;
             muse) printf '%s' "$detected_muse" ;;
             aider) printf '%s' "$detected_aider" ;;
+            jcode) printf '%s' "$detected_jcode" ;;
             *) printf 'NotInstalled' ;;
         esac
     }
@@ -588,7 +592,20 @@ choose_coding_agents() {
             install_aider=0
         fi
 
-        if [ "$install_claude" -eq 1 ] || [ "$install_codex" -eq 1 ] || [ "$install_pi" -eq 1 ] || [ "$install_opencode" -eq 1 ] || [ "$install_cline" -eq 1 ] || [ "$install_hermes" -eq 1 ] || [ "$install_dsh" -eq 1 ] || [ "$install_grok" -eq 1 ] || [ "$install_muse" -eq 1 ] || [ "$install_aider" -eq 1 ]; then
+        if [ "$install_jcode" -eq 1 ]; then
+            jcode_default=yes
+        else
+            jcode_default=no
+        fi
+        # Declining still leaves the luicode-jcode wrapper in place, so this
+        # prompt only decides whether the jcode binary itself is fetched.
+        if read_coding_agent_selection "$(cached_state_of jcode)" "jcode" luicode-jcode "$jcode_default"; then
+            install_jcode=1
+        else
+            install_jcode=0
+        fi
+
+        if [ "$install_claude" -eq 1 ] || [ "$install_codex" -eq 1 ] || [ "$install_pi" -eq 1 ] || [ "$install_opencode" -eq 1 ] || [ "$install_cline" -eq 1 ] || [ "$install_hermes" -eq 1 ] || [ "$install_dsh" -eq 1 ] || [ "$install_grok" -eq 1 ] || [ "$install_muse" -eq 1 ] || [ "$install_aider" -eq 1 ] || [ "$install_jcode" -eq 1 ]; then
             break
         fi
         printf 'Select at least one coding agent.\n\n' >&4
@@ -1444,6 +1461,26 @@ ensure_aider() {
     verify_command aider "Aider"
 }
 
+install_jcode_cli() {
+    if [ "$TERMUX" -eq 1 ]; then
+        # jcode ships a glibc-linked binary that patchelf must retarget, so
+        # both packages are required before its installer runs.
+        printf 'jcode needs glibc and patchelf on Android/Termux.\n'
+        run pkg install -y glibc patchelf
+    fi
+    download_and_run "$JCODE_INSTALL_URL" bash "jcode"
+}
+
+ensure_jcode() {
+    if command -v jcode >/dev/null 2>&1; then
+        printf 'jcode already found on PATH; verifying it.\n'
+    else
+        install_jcode_cli
+    fi
+
+    verify_command jcode "jcode"
+}
+
 ensure_selected_coding_agents() {
     if [ "$install_claude" -eq 1 ]; then
         step "Ensuring Claude Code is installed"
@@ -1495,7 +1532,12 @@ ensure_selected_coding_agents() {
         ensure_aider
     fi
 
-    if [ "$install_claude" -eq 0 ] && [ "$install_codex" -eq 0 ] && [ "$pi_available" -eq 0 ] && [ "$install_opencode" -eq 0 ] && [ "$install_cline" -eq 0 ] && [ "$install_hermes" -eq 0 ] && [ "$install_dsh" -eq 0 ] && [ "$install_grok" -eq 0 ] && [ "$install_muse" -eq 0 ] && [ "$install_aider" -eq 0 ]; then
+    if [ "$install_jcode" -eq 1 ]; then
+        step "Ensuring jcode is installed"
+        ensure_jcode
+    fi
+
+    if [ "$install_claude" -eq 0 ] && [ "$install_codex" -eq 0 ] && [ "$pi_available" -eq 0 ] && [ "$install_opencode" -eq 0 ] && [ "$install_cline" -eq 0 ] && [ "$install_hermes" -eq 0 ] && [ "$install_dsh" -eq 0 ] && [ "$install_grok" -eq 0 ] && [ "$install_muse" -eq 0 ] && [ "$install_aider" -eq 0 ] && [ "$install_jcode" -eq 0 ]; then
         fail "No selected coding agent was installed. Re-run the installer and choose at least one."
     fi
 }
@@ -2556,5 +2598,9 @@ else
     else
         printf 'The luicode-aider wrapper is ready after you install Aider.\n'
     fi
-    printf 'The luicode-jcode wrapper is ready after you install jcode.\n'
+    if [ "$install_jcode" -eq 1 ]; then
+        printf 'Run jcode with: luicode-jcode\n'
+    else
+        printf 'The luicode-jcode wrapper is ready after you install jcode.\n'
+    fi
 fi

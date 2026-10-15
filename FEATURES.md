@@ -246,7 +246,7 @@ async def my_handler(browser_tools: BrowserToolsPort):
 | **Grok Build** | `luicode-grok` | xAI | ✅ Supported |
 | **Muse Code** | `luicode-muse` | Meta | ❌ No Android support |
 | **Aider** | `luicode-aider` | Terminal-based | ✅ Supported |
-| **jcode** | `luicode-jcode` | Rust TUI, Anthropic-compatible profile | ✅ Supported with `pkg install glibc patchelf` |
+| **jcode** | `luicode-jcode` | Rust TUI, Anthropic-compatible profile | ✅ Supported with `pkg install glibc patchelf` (installer adds the Termux prerequisite automatically) |
 | **Desktop** | `luicode-desktop` | GUI launcher | ✅ Supported |
 
 ---

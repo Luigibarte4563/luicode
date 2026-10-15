@@ -43,6 +43,7 @@ $DshVersion = "0.1.0-rc.8"
 $DshPackage = "@deepseek-ai/dsh@$DshVersion"
 $GrokInstallUrl = "https://x.ai/cli/install.ps1"
 $MuseInstallUrl = "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/scripts/install-muse.ps1"
+$JcodeInstallUrl = "https://jcode.sh/install.ps1"
 $RtkVersion = "0.44.2"
 $RtkReleaseBaseUrl = "https://github.com/rtk-ai/rtk/releases/download/v$RtkVersion"
 $RtkWindowsAssetName = "rtk-x86_64-pc-windows-msvc.zip"
@@ -58,6 +59,9 @@ $script:InstallDsh = $true
 $script:InstallGrok = $true
 $script:InstallMuse = $true
 $script:InstallAider = $true
+# jcode defaults to no: installing it fetches a third-party script, so the user
+# opts in rather than having it happen as a side effect of updating.
+$script:InstallJcode = $false
 $script:PiAvailable = $false
 $script:MuseAvailable = $false
 $script:EnableRtk = $Rtk.IsPresent
@@ -94,6 +98,7 @@ $CodingAgentCatalog = @(
     [pscustomobject] @{ CommandName = "grok"; DisplayName = "Grok Build"; LuicodeCommand = "luicode-grok"; DefaultYes = $true }
     [pscustomobject] @{ CommandName = "muse"; DisplayName = "Muse Code"; LuicodeCommand = "luicode-muse"; DefaultYes = $true }
     [pscustomobject] @{ CommandName = "aider"; DisplayName = "Aider"; LuicodeCommand = "luicode-aider"; DefaultYes = $true }
+    [pscustomobject] @{ CommandName = "jcode"; DisplayName = "jcode"; LuicodeCommand = "luicode-jcode"; DefaultYes = $false }
 )
 
 function Show-Usage {
@@ -454,10 +459,11 @@ function Select-CodingAgents {
                 "grok" { $script:InstallGrok = $value }
                 "muse" { $script:InstallMuse = $value }
                 "aider" { $script:InstallAider = $value }
+                "jcode" { $script:InstallJcode = $value }
             }
         }
 
-        if ($script:InstallClaudeCode -or $script:InstallCodex -or $script:InstallPi -or $script:InstallOpenCode -or $script:InstallCline -or $script:InstallHermes -or $script:InstallDsh -or $script:InstallGrok -or $script:InstallMuse -or $script:InstallAider) {
+        if ($script:InstallClaudeCode -or $script:InstallCodex -or $script:InstallPi -or $script:InstallOpenCode -or $script:InstallCline -or $script:InstallHermes -or $script:InstallDsh -or $script:InstallGrok -or $script:InstallMuse -or $script:InstallAider -or $script:InstallJcode) {
             break
         }
         Write-Host "Select at least one coding agent."
@@ -1508,6 +1514,20 @@ function Ensure-Muse {
     $script:MuseAvailable = $true
 }
 
+function Ensure-Jcode {
+    Invoke-DownloadedPowerShellInstaller -Url $JcodeInstallUrl -Name "jcode"
+    Add-KnownBinDirectories
+    $commandName = "jcode"
+    if (-not $DryRun) {
+        $command = Find-InstalledCodingAgent "jcode"
+        if (-not $command) {
+            throw "jcode was installed, but 'jcode' is not available on PATH."
+        }
+        $commandName = $command.Source
+    }
+    Confirm-Application -CommandName $commandName -DisplayName "jcode"
+}
+
 function Get-DshVersion {
     param([string] $DshPath)
 
@@ -1685,7 +1705,12 @@ function Ensure-SelectedCodingAgents {
         Ensure-Aider
     }
 
-    if ((-not $script:InstallClaudeCode) -and (-not $script:InstallCodex) -and (-not $script:PiAvailable) -and (-not $script:InstallOpenCode) -and (-not $script:InstallCline) -and (-not $script:InstallHermes) -and (-not $script:InstallDsh) -and (-not $script:InstallGrok) -and (-not $script:MuseAvailable) -and (-not $script:InstallAider)) {
+    if ($script:InstallJcode) {
+        Write-Step "Ensuring jcode is installed"
+        Ensure-Jcode
+    }
+
+    if ((-not $script:InstallClaudeCode) -and (-not $script:InstallCodex) -and (-not $script:PiAvailable) -and (-not $script:InstallOpenCode) -and (-not $script:InstallCline) -and (-not $script:InstallHermes) -and (-not $script:InstallDsh) -and (-not $script:InstallGrok) -and (-not $script:MuseAvailable) -and (-not $script:InstallAider) -and (-not $script:InstallJcode)) {
         throw "No selected coding agent was installed. Re-run the installer and choose at least one."
     }
 }
@@ -2204,5 +2229,12 @@ else {
     else {
         Write-Host "The luicode-aider wrapper is ready after you install Aider."
     }
-    Write-Host "The luicode-jcode wrapper is ready after you install jcode."
+    # Declining still leaves the luicode-jcode wrapper in place; this branch only
+    # reports whether the jcode binary itself was installed.
+    if ($script:InstallJcode) {
+        Write-Host "Run jcode with: luicode-jcode"
+    }
+    else {
+        Write-Host "The luicode-jcode wrapper is ready after you install jcode."
+    }
 }

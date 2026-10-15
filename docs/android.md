@@ -161,7 +161,7 @@ separately, and each has its own Android support status:
 | DeepSeek Harness (`luicode-dsh`) | ✅ Supported | Node.js-based |
 | Grok Build (`luicode-grok`) | ✅ Supported | Node.js-based |
 | Aider (`luicode-aider`) | ✅ Supported | Python-based, installed via uv |
-| jcode (`luicode-jcode`) | ✅ Supported | Rust binary, requires `pkg install glibc patchelf` |
+| jcode (`luicode-jcode`) | ✅ Supported | Rust binary; the installer runs `pkg install glibc patchelf` for you |
 | Hermes Agent | ❌ Not supported | No ARM64 Linux release for Termux |
 | Muse Code | ❌ Not supported | No Android/Termux support |
 
