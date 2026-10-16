@@ -1,5 +1,7 @@
 """Rendered provider-setup regressions for the local Admin UI."""
 
+import re
+
 import pytest
 from playwright.sync_api import ConsoleMessage, Page, Route, ViewportSize, expect
 
@@ -427,3 +429,76 @@ def test_manual_provider_test_takes_precedence_over_automatic_availability(
         )
         expect(result).to_have_text("1 model available")
     expect(dialog.get_by_role("button", name="Test", exact=True)).to_be_enabled()
+
+
+def test_default_route_card_follows_the_default_model(page: Page, admin_base_url: str):
+    """Exactly the provider MODEL resolves to is marked, and only that one."""
+    is_default = re.compile(r"\bis-default\b")
+    _open_admin(page, admin_base_url, {"width": 1280, "height": 720})
+    provider_id = page.evaluate(
+        "() => document.getElementById('field-MODEL').value.split('/')[0]"
+    )
+    leader = page.locator(f'[data-provider="{provider_id}"]')
+    expect(leader).to_have_class(is_default)
+    expect(leader.get_by_text("default route")).to_be_visible()
+
+    marked = page.locator(".provider-card.is-default")
+    expect(marked).to_have_count(1)
+    assert marked.get_attribute("data-provider") == provider_id
+
+    # Unconfigured cards recede so the configured set carries the scan.
+    unconfigured = page.locator('[data-provider="nvidia_nim"]')
+    expect(unconfigured).to_have_class(re.compile(r"\bis-unconfigured\b"))
+
+
+def test_provider_search_filters_cards_and_group_counts(page: Page, admin_base_url: str):
+    """Fifty-odd providers need a filter that also empties the groups."""
+    _open_admin(page, admin_base_url, {"width": 1280, "height": 720})
+    search = page.locator("#providerSearch")
+    expect(search).to_be_visible()
+
+    search.fill("nvidia")
+    expect(page.locator('[data-provider="nvidia_nim"]')).to_be_visible()
+    for hidden in ("groq", "deepseek", "cerebras", "ollama", "lmstudio"):
+        expect(page.locator(f'[data-provider="{hidden}"]')).to_be_hidden()
+    expect(page.locator("#providerSearchCount")).to_have_text("1 / 55")
+    # Groups with nothing left in them disappear rather than showing a void.
+    expect(page.locator('[data-provider-group="local"]')).to_be_hidden()
+    expect(page.locator('[data-provider-group="cloud"]')).to_be_visible()
+
+    search.fill("")
+    expect(page.locator('[data-provider="groq"]')).to_be_visible()
+    expect(page.locator("#providerSearchCount")).to_have_text("")
+
+
+def test_diagnostics_settings_are_reachable_behind_the_advanced_disclosure(
+    page: Page, admin_base_url: str,
+):
+    """Nine logging flags exist in the manifest and must have a home."""
+    _open_admin(page, admin_base_url, {"width": 1280, "height": 720})
+    diagnostics = page.locator("#section-diagnostics")
+    expect(diagnostics).to_be_visible()
+    expect(page.locator("#field-LOG_LEVEL")).to_be_hidden()
+
+    diagnostics.locator(".settings-advanced > summary").click()
+    expect(page.locator("#field-LOG_LEVEL")).to_be_visible()
+    # Normal fields must not be swept into the disclosure with them.
+    expect(page.locator("#field-PROXY_AUTH_ENABLED")).to_be_visible()
+    expect(page.locator("#field-PROVIDER_STREAM_HOLDBACK_SECONDS")).to_be_hidden()
+
+
+def test_runtime_settings_sit_beside_the_provider_groups_on_wide_screens(
+    page: Page, admin_base_url: str,
+):
+    """Providers are inventory, Runtime is machine config: side by side."""
+    _open_admin(page, admin_base_url, {"width": 1440, "height": 900})
+    groups = page.locator("#providerGroups").bounding_box()
+    runtime = page.locator("#providersSections").bounding_box()
+    assert runtime["x"] >= groups["x"] + groups["width"] - 1, "columns must not overlap"
+
+    page.set_viewport_size({"width": 900, "height": 900})
+    page.evaluate("() => new Promise(requestAnimationFrame)")
+    groups = page.locator("#providerGroups").bounding_box()
+    stacked = page.locator("#providersSections").bounding_box()
+    assert stacked["x"] == pytest.approx(groups["x"], abs=2)
+    assert stacked["y"] > groups["y"]

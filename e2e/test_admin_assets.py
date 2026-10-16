@@ -27,7 +27,6 @@ def test_admin_page_spacing_matches_visible_action_bar(page, admin_base_url, wid
           const main = document.querySelector('.main');
           const style = getComputedStyle(main);
           const bar = document.querySelector('.action-bar');
-          const last = document.querySelector('.admin-view:not([hidden]) .form-sections > :last-child');
           const heading = document.querySelector('#pageTitle');
           const range = document.createRange();
           range.selectNodeContents(heading);
@@ -41,7 +40,21 @@ def test_admin_page_spacing_matches_visible_action_bar(page, admin_base_url, wid
             top: parseFloat(style.paddingTop),
             bottom: parseFloat(style.paddingBottom),
             bar: bar.getBoundingClientRect().height,
-            endGap: last ? main.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom : null,
+            // Clearance is measured from the deepest content in the active view: with a
+            // multi-column layout the shorter column ends far above the bottom
+            // and only the deepest one can reach the action bar.
+            content: (() => {
+              const view = document.querySelector('.admin-view:not([hidden])');
+              if (!view) return null;
+              const kids = [...view.children];
+              const bottoms = kids.map(child => child.getBoundingClientRect().bottom);
+              const deepest = kids[bottoms.indexOf(Math.max(...bottoms))];
+              return {
+                deepestIsOnlyColumn:
+                  kids.length === 1 && !!deepest?.querySelector(':scope > .settings-section'),
+                endGap: main.getBoundingClientRect().bottom - Math.max(...bottoms),
+              };
+            })(),
             headingGap: inkTop - main.getBoundingClientRect().top,
           };
         }""")
@@ -50,14 +63,22 @@ def test_admin_page_spacing_matches_visible_action_bar(page, admin_base_url, wid
         )
         # Ink can overshoot the font's cap metric; allow pixel rounding as well.
         assert measurements["headingGap"] == pytest.approx(measurements["top"], abs=2)
-        if measurements["endGap"] is not None:
-            assert measurements["endGap"] - measurements["bar"] == pytest.approx(
-                measurements["top"], abs=1
-            )
+        content = measurements["content"]
+        if content is not None:
+            if content["deepestIsOnlyColumn"]:
+                assert content["endGap"] - measurements["bar"] == pytest.approx(
+                    measurements["top"], abs=1
+                )
+            else:
+                # Side-by-side columns and card-based views only have to keep
+                # their content clear of the fixed bar.
+                assert content["endGap"] >= measurements["bar"]
 
     for title in ("Providers", "Model config", "Messaging"):
         page.get_by_role("button", name=title, exact=True).click()
-        expect(page.locator("#pageTitle")).to_have_text(title)
+        expect(page.locator("#pageTitle")).to_have_text(
+            "Providers & Runtime" if title == "Providers" else title
+        )
         assert_spacing()
 
     original_height = page.locator(".action-bar").bounding_box()["height"]
@@ -111,14 +132,16 @@ def test_selected_admin_tab_survives_refresh_and_browser_navigation(
         page.get_by_role("button", name=title, exact=True).click()
         expect(page).to_have_url(f"{admin_base_url}{path}")
         page.reload()
-        expect(page.locator("#pageTitle")).to_have_text(title)
+        expect(page.locator("#pageTitle")).to_have_text(
+            "Providers & Runtime" if title == "Providers" else title
+        )
         expect(page.get_by_role("button", name=title, exact=True)).to_have_attribute(
             "aria-current", "page"
         )
     page.go_back()
     expect(page.locator("#pageTitle")).to_have_text("Integrations")
     page.go_forward()
-    expect(page.locator("#pageTitle")).to_have_text("Providers")
+    expect(page.locator("#pageTitle")).to_have_text("Providers & Runtime")
 
 
 def test_admin_removes_chat_drafts_and_preserves_other_storage(page, admin_base_url):

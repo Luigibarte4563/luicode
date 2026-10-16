@@ -641,8 +641,9 @@ def test_admin_static_hides_managed_source_label():
 
     assert 'managed_env: "",' in script
     assert "hasOwnProperty.call(labels, source)" in script
-    assert 'parts.push("locked")' in script
-    assert "sourceEl.textContent = source" in script
+    # The origin and the locked marker are separate chips, not one lumped label.
+    assert 'labels.push(["locked", " field-source-locked"])' in script
+    assert "sourceEl.textContent = text" in script
 
 
 def test_admin_static_places_reasoning_fields_in_model_config():

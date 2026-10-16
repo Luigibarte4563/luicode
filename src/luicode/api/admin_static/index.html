@@ -39,6 +39,16 @@
 
         <div id="adminViews" class="admin-views">
           <section id="view-providers" class="admin-view active" data-view="providers">
+            <div id="providerFilter" class="provider-filter">
+              <input
+                id="providerSearch"
+                type="search"
+                autocomplete="off"
+                aria-label="Filter providers"
+                placeholder="Filter providers by name…"
+              />
+              <span id="providerSearchCount" class="provider-filter-count"></span>
+            </div>
             <div id="providerGroups"></div>
             <div
               id="providersSections"
@@ -159,6 +169,7 @@
           </section>
 
           <section id="view-usage" class="admin-view" data-view="usage" hidden>
+            <p id="usageError" class="message-area error" role="alert" hidden></p>
             <div class="usage-filters">
               <label>Since: <select id="usageSinceHours" onchange="loadSummary(); loadRequests(0);">
                 <option value="1">Last hour</option>
