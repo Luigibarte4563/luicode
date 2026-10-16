@@ -223,9 +223,18 @@
       loadProvidersHealth(),
     ]);
     if (token !== generation) return;
-    if (results.some((result) => result.status === "rejected")) return;
+    const failed = results.find((result) => result.status === "rejected");
+    showError(failed ? failed.reason?.message || "Could not refresh usage data." : "");
+    if (failed) return;
     lastUpdatedMs = Date.now();
     renderLiveState();
+  }
+
+  function showError(message) {
+    const element = document.getElementById("usageError");
+    if (!element) return;
+    element.textContent = message;
+    element.hidden = !message;
   }
 
   function rangeHours() {
@@ -268,9 +277,14 @@
     element.classList.add("is-updated");
   }
 
+  function setRows(tbody, html, columns) {
+    tbody.innerHTML =
+      html || `<tr><td colspan="${columns}" class="usage-empty">No data in this range.</td></tr>`;
+  }
+
   function renderProvidersTable(providers) {
     const tbody = document.getElementById("providersTableBody");
-    tbody.innerHTML = providers.map(p => `
+    setRows(tbody, providers.map(p => `
       <tr>
         <td>${escapeHtml(p.provider_id)}</td>
         <td>${escapeHtml(p.provider_model)}</td>
@@ -280,12 +294,12 @@
         <td class="text-right">${formatCost(p.cost)}</td>
         <td class="text-right">${formatDuration(p.avg_latency)}</td>
       </tr>
-    `).join("");
+    `).join(""), 7);
   }
 
   function renderAgentsTable(agents) {
     const tbody = document.getElementById("agentsTableBody");
-    tbody.innerHTML = agents.map(a => `
+    setRows(tbody, agents.map(a => `
       <tr>
         <td>${escapeHtml(a.agent)}</td>
         <td class="text-right">${formatNumber(a.requests)}</td>
@@ -293,12 +307,12 @@
         <td class="text-right">${formatNumber(a.output_tokens)}</td>
         <td class="text-right">${formatCost(a.cost)}</td>
       </tr>
-    `).join("");
+    `).join(""), 5);
   }
 
   function renderOptimizationsTable(opts) {
     const tbody = document.getElementById("optimizationsTableBody");
-    tbody.innerHTML = opts.map(o => `
+    setRows(tbody, opts.map(o => `
       <tr>
         <td>${escapeHtml(o.optimization)}</td>
         <td class="text-right">${formatNumber(o.count)}</td>
@@ -306,7 +320,7 @@
         <td class="text-right">${formatNumber(o.saved_output)}</td>
         <td class="text-right">${formatCost(o.saved_cost)}</td>
       </tr>
-    `).join("");
+    `).join(""), 5);
   }
 
   function syncFilterOptions() {
@@ -331,7 +345,7 @@
     const select = document.getElementById(selectId);
     if (!select) return;
     const cached = select.dataset[cacheId];
-    const signature = values.join(" ");
+    const signature = values.join("\0");
     if (cached === signature) return;
     // Never disturb the current selection while live data streams in.
     const current = select.value;
@@ -343,6 +357,10 @@
     }
     select.value = current;
     select.dataset[cacheId] = signature;
+  }
+
+  function tokenColor(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
 
   function renderTimeseriesChart(timeseries) {
@@ -379,24 +397,24 @@
           {
             label: "Requests",
             data: requests,
-            borderColor: "#3b82f6",
-            backgroundColor: "rgba(59, 130, 246, 0.1)",
+            borderColor: tokenColor("--info"),
+            backgroundColor: tokenColor("--info-muted"),
             yAxisID: "y",
             tension: 0.3,
           },
           {
             label: "Tokens (×1000)",
             data: tokens.map(t => t / 1000),
-            borderColor: "#10b981",
-            backgroundColor: "rgba(16, 185, 129, 0.1)",
+            borderColor: tokenColor("--ok"),
+            backgroundColor: tokenColor("--ok-muted"),
             yAxisID: "y1",
             tension: 0.3,
           },
           {
             label: "Cost ($)",
             data: costs,
-            borderColor: "#f59e0b",
-            backgroundColor: "rgba(245, 158, 11, 0.1)",
+            borderColor: tokenColor("--warn"),
+            backgroundColor: tokenColor("--warn-muted"),
             yAxisID: "y2",
             tension: 0.3,
           },
@@ -439,7 +457,7 @@
 
   function renderRequestsTable(requests) {
     const tbody = document.getElementById("requestsTableBody");
-    tbody.innerHTML = requests.map(r => `
+    setRows(tbody, requests.map(r => `
       <tr>
         <td class="font-mono text-xs">${escapeHtml(r.request_id.slice(0, 12))}…</td>
         <td>${formatTimeAgo(r.started_ms)}</td>
@@ -455,7 +473,7 @@
         <td class="text-right">${r.attempt_count}</td>
         <td>${escapeHtml(r.fallback_path?.join(" → ") || "—")}</td>
       </tr>
-    `).join("");
+    `).join(""), 13);
   }
 
   function renderPagination(limit, offset, returnedCount) {
@@ -472,18 +490,18 @@
   async function loadProvidersHealth() {
     const data = await fetchJSON(`${API_BASE}/providers/health`);
     const tbody = document.getElementById("healthTableBody");
-    tbody.innerHTML = (data.providers || []).map(p => `
+    setRows(tbody, (data.providers || []).map(p => `
       <tr>
         <td>${escapeHtml(p.provider_id)}</td>
         <td><span class="badge ${p.is_healthy ? "badge-success" : "badge-error"}">${p.is_healthy ? "Healthy" : "Degraded"}</span></td>
-        <td>${p.current_episode}</td>
-        <td class="text-right">${p.success_rate ? (p.success_rate * 100).toFixed(1) + "%" : "—"}</td>
+        <td>${escapeHtml(p.current_episode)}</td>
+        <td class="text-right">${p.success_rate === null || p.success_rate === undefined ? "—" : (p.success_rate * 100).toFixed(1) + "%"}</td>
         <td class="text-right">${formatDuration(p.p50_latency_ms)}</td>
         <td class="text-right">${formatDuration(p.p95_latency_ms)}</td>
         <td class="text-right">${p.rate_limit_remaining !== null ? formatNumber(p.rate_limit_remaining) : "—"}</td>
         <td>${p.last_error ? escapeHtml(p.last_error.slice(0, 50)) + "…" : "—"}</td>
       </tr>
-    `).join("");
+    `).join(""), 8);
   }
 
   // -------------------------------------------------------------- live status

@@ -95,6 +95,8 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
+    outputs:
+      publishable: ${{ steps.release.outputs.publishable }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -111,10 +113,34 @@ jobs:
       - name: Run tests
         run: uv run --locked pytest -q --tb=short
 
+      # Only a qualifying subject touching a release path publishes. Deciding it
+      # here means an ordinary push never opens a pypi deployment to approve.
+      # The predicate is release_kind, the same one scripts.publish_release uses.
+      - name: Decide whether this commit is releasable
+        id: release
+        env:
+          RELEASE_COMMIT: ${{ inputs.release_commit || github.sha }}
+        run: |
+          uv run --no-project --python "$(cat .python-version)" python - <<'PY'
+          import os, subprocess, sys
+          sys.path.insert(0, "scripts")
+          from check_version_policy import changed_paths, release_kind
+
+          target = os.environ["RELEASE_COMMIT"]
+          title = subprocess.run(
+              ["git", "show", "-s", "--format=%s", target],
+              check=True, capture_output=True, text=True, encoding="utf-8",
+          ).stdout.rstrip("\r\n")
+          kind = release_kind(title, changed_paths(f"{target}^", target))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"publishable={str(kind is not None).lower()}\n")
+          print(f"Release kind for {target[:7]}: {kind or 'none'}")
+          PY
+
   publish:
     name: Publish to PyPI
     needs: verify
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.verify.outputs.publishable == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: pypi

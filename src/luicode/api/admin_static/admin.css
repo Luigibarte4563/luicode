@@ -49,21 +49,40 @@
   --neutral-border: rgba(139, 148, 158, 0.35);
 
   --info: #58a6ff;
+  --info-bg: rgba(88, 166, 255, 0.12);
+
+  /* Translucent variants for chart fills */
+  --info-muted: rgba(88, 166, 255, 0.1);
+  --ok-muted: rgba(63, 185, 80, 0.1);
+  --warn-muted: rgba(210, 153, 34, 0.1);
 
   /* Box Shadow & Glows */
   --shadow-sm: 0 1px 3px rgba(1, 4, 9, 0.4);
   --shadow: 0 16px 40px rgba(1, 4, 9, 0.55);
   --glow-accent: 0 0 0 3px rgba(61, 232, 171, 0.3);
 
-  /* Borders and Radius */
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 12px;
+  /* Borders and Radius — deliberately tight so the Admin reads like an IDE */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
   --radius-full: 9999px;
   --dropdown-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%238b949e' stroke-width='2.5'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19.5 8.25l-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
 
-  /* Typography */
+  /* Typography — Inter for prose, mono for anything the machine produced
+     (env keys, ports, model slugs, provider ids, metrics) */
   --font-sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Aliases consumed by usage.css, which shipped against a token set that was
+     never defined — without these its declarations resolved to initial values. */
+  --card-bg: var(--card);
+  --input-bg: var(--input);
+  --header-bg: var(--panel-strong);
+  --hover-bg: var(--card-hover);
+  --border-color: var(--line);
+  --text-primary: var(--text-strong);
+  --text-secondary: var(--text);
+  --text-muted: var(--muted);
 
   /* Transitions */
   --transition-fast: 0.15s ease;
@@ -221,8 +240,8 @@ textarea:focus-visible,
 /* Main Content Area */
 .main {
   min-width: 0;
-  padding: 40px 48px;
-  padding-bottom: calc(40px + var(--action-bar-height, 0px));
+  padding: 32px 24px;
+  padding-bottom: calc(32px + var(--action-bar-height, 0px));
   background: var(--main-bg);
 }
 
@@ -418,6 +437,7 @@ button.startup-busy::before,
 .provider-card {
   display: flex;
   flex-direction: column;
+  position: relative;
   padding: 20px;                 /* was 16px — more breathing room on all sides */
   gap: 0;                        /* replaced by explicit spacing below, not a flat gap */
   min-height: 160px;             /* slightly taller to fit comfortable spacing */
@@ -774,6 +794,152 @@ button.startup-busy::before,
   gap: 20px;
 }
 
+/* Default route (the provider that MODEL resolves to) reads as the primary
+   card: accent bar on the left, lifted background. */
+.provider-card.is-default {
+  border-color: var(--accent-border);
+  background: var(--panel-strong);
+}
+
+.provider-card.is-default::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  background: var(--accent);
+}
+
+.provider-default-chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+/* Not-configured cards recede so the configured set carries the scan. */
+.provider-card.is-unconfigured {
+  background: transparent;
+  border-style: dashed;
+}
+
+.provider-card.is-unconfigured .provider-card-name,
+.provider-card.is-unconfigured .provider-card-desc {
+  opacity: 0.75;
+}
+
+.provider-card.is-unconfigured:hover {
+  opacity: 1;
+}
+
+/* Search: filter bar above the provider groups */
+.provider-filter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.provider-filter input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--input);
+  color: var(--text-strong);
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.provider-filter input::placeholder {
+  color: var(--muted);
+}
+
+.provider-filter-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Providers are inventory and Runtime is machine config: side by side on wide
+   screens, stacked below 1280px. Order in index.html must not change. */
+@media (min-width: 1280px) {
+  #view-providers {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  #view-providers > #providerGroups {
+    grid-column: 1;
+  }
+
+  #view-providers > #providersSections {
+    grid-column: 2;
+    position: sticky;
+    top: 24px;
+  }
+
+  #view-providers > #providersSections .settings-section:last-child {
+    margin-bottom: 0;
+  }
+}
+
+/* Advanced fields live in a disclosure instead of a bare toggle button */
+.settings-advanced {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-strong);
+}
+
+.settings-advanced > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.settings-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-advanced > summary::after {
+  content: "+";
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.settings-advanced[open] > summary::after {
+  content: "−";
+}
+
+.settings-advanced > .field-grid {
+  padding: 0 14px 14px;
+}
+
 /* Field Grouping */
 .field {
   display: flex;
@@ -784,12 +950,25 @@ button.startup-busy::before,
 
 .field label {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  align-items: baseline;
+  justify-content: flex-start;
+  /* Chips drop to their own line rather than squeezing the human label. */
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-size: 13px;
   font-weight: 700;
   color: var(--text-strong);
+}
+
+/* Keep the origin chip pinned right regardless of how many children the
+   label holds, so inserting the key never reflows it into the middle. */
+.field-source-origin {
+  margin-left: auto;
+}
+
+.field-source-locked {
+  color: var(--error);
+  background: var(--error-bg);
 }
 
 .field-source {
@@ -801,6 +980,16 @@ button.startup-busy::before,
   background: var(--accent-muted);
   padding: 1px 6px;
   border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+/* The raw env key, in mono — the machine identity of the setting. */
+.field-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 /* Form Inputs, Select, Textareas */
@@ -976,18 +1165,51 @@ button.startup-busy::before,
 .field textarea:focus {
   border-color: var(--accent);
   background: var(--input-focus);
-  box-shadow: 0 0 0 3px rgba(240, 165, 28, 0.22);
+  box-shadow: var(--glow-accent);
   outline: none;
 }
 
-/* Checkbox specific layout styling */
+/* Boolean fields render as a switch: appearance:none keeps the native checkbox
+   as the control (and its value in readFieldValue), only the paint changes. */
 .field input[type="checkbox"] {
+  appearance: none;
   align-self: flex-start;
-  width: 20px;
+  position: relative;
+  width: 36px;
   height: 20px;
-  accent-color: var(--accent);
+  margin: 2px 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-full);
+  background: var(--panel-strong);
   cursor: pointer;
-  margin: 4px 0;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.field input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.field input[type="checkbox"]:checked {
+  background: var(--accent-muted);
+  border-color: var(--accent-border);
+}
+
+.field input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+.field input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .field textarea {
@@ -1017,15 +1239,9 @@ button.startup-busy::before,
   display: none;
 }
 
-.settings-section.show-advanced .advanced-field,
+.settings-advanced[open] .advanced-field,
 .provider-dialog .advanced-field {
   display: flex;
-}
-
-.advanced-toggle {
-  margin-top: 20px;
-  font-size: 12px;
-  border: 1px solid var(--line-strong);
 }
 
 /* Fixed Bottom Action Bar */

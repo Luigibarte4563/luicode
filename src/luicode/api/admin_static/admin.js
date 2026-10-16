@@ -27,9 +27,9 @@ const VIEW_GROUPS = [
   {
     id: "providers",
     label: "Providers",
-    title: "Providers",
-    subtitle: "Connect model providers so luicode can discover and route to their models.",
-    sections: ["runtime"],
+    title: "Providers & Runtime",
+    subtitle: "Connect model providers, then tune the gateway runtime that routes to their models.",
+    sections: ["runtime", "diagnostics"],
     containerId: "providersSections",
   },
   {
@@ -88,6 +88,14 @@ function viewFromLocation() {
 
 const byId = (id) => document.getElementById(id);
 
+// MODEL is the fallback for every request, so its provider prefix is the
+// gateway's default route — the one provider card worth leading with.
+function defaultProviderId() {
+  const model = state.fields.get("MODEL")?.value || "";
+  const slash = model.indexOf("/");
+  return slash > 0 ? model.slice(0, slash) : "";
+}
+
 function sourceLabel(source) {
   const labels = {
     default: "default",
@@ -97,16 +105,12 @@ function sourceLabel(source) {
   return Object.prototype.hasOwnProperty.call(labels, source) ? labels[source] : source;
 }
 
-function sourceText(field) {
-  const parts = [];
-  const label = sourceLabel(field.source);
-  if (label) {
-    parts.push(label);
-  }
-  if (field.locked) {
-    parts.push("locked");
-  }
-  return parts.join(" ");
+function sourceLabels(field) {
+  const labels = [];
+  const origin = sourceLabel(field.source);
+  if (origin) labels.push([origin, " field-source-origin"]);
+  if (field.locked) labels.push(["locked", " field-source-locked"]);
+  return labels;
 }
 
 async function api(path, options = {}) {
@@ -333,6 +337,8 @@ function navigateToView(viewId) {
 function renderProviders(providerStatus) {
   const container = byId("providerGroups");
   container.replaceChildren();
+  byId("providerSearch").value = "";
+  byId("providerSearchCount").textContent = "";
   [
     ["oauth", "OAuth providers", "connected"],
     ["cloud", "Cloud providers", "configured"],
@@ -381,11 +387,56 @@ function updateGroupCounts() {
     if (!badge) return;
     const kind = group.dataset.providerGroup;
     const configured = group.querySelector('[data-provider-subgroup="configured"]');
-    const count = configured ? configured.querySelectorAll(".provider-card").length : 0;
+    const count = configured ? visibleCards(configured).length : 0;
     const word = kind === "oauth" ? "connected" : "configured";
     badge.textContent = `${count} ${word}`;
   });
 }
+
+function visibleCards(container) {
+  return [...container.querySelectorAll(".provider-card")].filter(
+    (card) => !card.hidden,
+  );
+}
+
+function updateSearchCount() {
+  const count = state.config.provider_status.filter((provider) => {
+    const card = document.querySelector(`[data-provider="${provider.provider_id}"]`);
+    return card && !card.hidden;
+  }).length;
+  const total = state.config.provider_status.length;
+  byId("providerSearchCount").textContent = count === total ? "" : `${count} / ${total}`;
+}
+
+function applyProviderSearch() {
+  const query = byId("providerSearch").value.trim().toLocaleLowerCase();
+  state.config.provider_status.forEach((provider) => {
+    const card = document.querySelector(`[data-provider="${provider.provider_id}"]`);
+    if (!card) return;
+    card.hidden = !!query && !providerMatches(card, query);
+  });
+  syncProviderVisibility();
+  updateGroupCounts();
+  updateSearchCount();
+}
+
+// Hide the subgroups and groups a filter has emptied, so a search never leaves
+// an empty shell behind.
+function syncProviderVisibility() {
+  document.querySelectorAll("[data-provider-subgroup]").forEach((subgroup) => {
+    subgroup.hidden = visibleCards(subgroup.querySelector(".provider-grid")).length === 0;
+  });
+  document.querySelectorAll("[data-provider-group]").forEach((group) => {
+    group.hidden = !group.querySelector(".provider-card:not([hidden])");
+  });
+}
+
+function providerMatches(card, query) {
+  return (card.textContent || "").toLocaleLowerCase().includes(query);
+}
+
+byId("providerSearch").addEventListener("input", applyProviderSearch);
+window.LuicodeFormControls.configure(byId("providerSearch"));
 
 function updateProviderCard(provider) {
   const oauth = provider.kind === "connected_account";
@@ -402,6 +453,8 @@ function updateProviderCard(provider) {
   }
   const focused = card.contains(document.activeElement);
   const focusedLabel = focused ? document.activeElement.textContent : null;
+  card.classList.toggle("is-default", provider.provider_id === defaultProviderId());
+  card.classList.toggle("is-unconfigured", !configured);
 
   // Header with logo, name, description, meta, and status pill
   const header = document.createElement("div");
@@ -448,6 +501,13 @@ function updateProviderCard(provider) {
   applyProviderPill(pill, provider);
   titleWrap.appendChild(pill);
 
+  if (card.classList.contains("is-default")) {
+    const chip = document.createElement("span");
+    chip.className = "provider-default-chip";
+    chip.textContent = "default route";
+    titleWrap.appendChild(chip);
+  }
+
   header.appendChild(titleWrap);
 
   // Actions
@@ -472,9 +532,7 @@ function updateProviderCard(provider) {
     connectedAccountName(provider).localeCompare(providerDisplayName(other.dataset.provider), "en", { sensitivity: "base" }) < 0);
   if (card.parentElement !== grid || card.nextElementSibling !== (next || null)) grid.insertBefore(card, next || null);
 
-  document.querySelectorAll("[data-provider-subgroup]").forEach((section) => {
-    section.hidden = section.querySelector(".provider-grid").childElementCount === 0;
-  });
+  syncProviderVisibility();
 
   if (focused) {
     const controls = [...card.querySelectorAll("a[href], button:not(:disabled)")];
@@ -907,21 +965,21 @@ function renderSections(sections, fields) {
 
       const grid = document.createElement("div");
       grid.className = "field-grid";
+      const advancedGrid = document.createElement("div");
+      advancedGrid.className = "field-grid";
       sectionFields.forEach((field) => {
-        grid.appendChild(renderField(field));
+        (field.advanced ? advancedGrid : grid).appendChild(renderField(field));
       });
-      sectionEl.appendChild(grid);
-
-      if (sectionFields.some((field) => field.advanced)) {
-        const toggle = document.createElement("button");
-        toggle.type = "button";
-        toggle.className = "ghost-button advanced-toggle";
-        toggle.textContent = "Show advanced";
-        toggle.addEventListener("click", () => {
-          const showing = sectionEl.classList.toggle("show-advanced");
-          toggle.textContent = showing ? "Hide advanced" : "Show advanced";
-        });
-        sectionEl.appendChild(toggle);
+      if (grid.childElementCount) sectionEl.appendChild(grid);
+      // Advanced fields collapse behind a disclosure, below the normal ones.
+      if (advancedGrid.childElementCount) {
+        const disclosure = document.createElement("details");
+        disclosure.className = "settings-advanced";
+        disclosure.append(
+          Object.assign(document.createElement("summary"), { textContent: "Advanced" }),
+          advancedGrid,
+        );
+        sectionEl.appendChild(disclosure);
       }
 
       container.appendChild(sectionEl);
@@ -940,13 +998,20 @@ function renderField(field) {
   labelText.textContent = field.label;
   label.appendChild(labelText);
 
-  const source = sourceText(field);
-  if (source) {
+  const key = document.createElement("code");
+  key.className = "field-key";
+  key.textContent = field.key;
+  // Visual metadata: keeping it out of the accessible name leaves the human
+  // label as the control's name instead of "Fable Override MODEL_FABLE".
+  key.setAttribute("aria-hidden", "true");
+  label.appendChild(key);
+
+  sourceLabels(field).forEach(([text, className]) => {
     const sourceEl = document.createElement("span");
-    sourceEl.className = "field-source";
-    sourceEl.textContent = source;
+    sourceEl.className = `field-source${className}`;
+    sourceEl.textContent = text;
     label.appendChild(sourceEl);
-  }
+  });
 
   const input = window.LuicodeFormControls.configure(inputForField(field));
   input.id = `field-${field.key}`;
@@ -970,6 +1035,16 @@ function renderField(field) {
         input.value = "None";
         updateDirtyState();
       }
+    });
+  }
+  if (field.key === "MODEL") {
+    // Keep the default-route card honest while the slug is being typed, but
+    // only repaint the cards when the provider it names actually changes.
+    input.addEventListener("input", () => {
+      const previous = defaultProviderId();
+      state.fields.set("MODEL", { ...field, value: input.value });
+      if (defaultProviderId() === previous) return;
+      state.config.provider_status.forEach(updateProviderCard);
     });
   }
 
@@ -1421,7 +1496,8 @@ async function apply(providerId = null) {
     setApplying(false);
     if (rejectedField) {
       if (!providerId) navigateToView("providers");
-      rejectedField.closest(".settings-section")?.classList.add("show-advanced");
+      const disclosure = rejectedField.closest(".settings-advanced");
+      if (disclosure) disclosure.open = true;
       rejectedField.scrollIntoView({ block: "center", behavior: "instant" });
       rejectedField.focus();
     } else if (providerId && applied) {

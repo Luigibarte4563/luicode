@@ -1,8 +1,9 @@
-/* Usage View Styles */
+﻿/* Usage View Styles */
 
 .usage-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  /* Seven tiles: 4 + 3 reads tidier than 5 + 2 at desktop widths. */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
@@ -10,7 +11,7 @@
 .usage-stat {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 1rem;
 }
 
@@ -30,15 +31,15 @@
 }
 
 .usage-stat-value.cost {
-  color: #f59e0b;
+  color: var(--warn);
 }
 
 .usage-stat-value.tokens {
-  color: #10b981;
+  color: var(--ok);
 }
 
 .usage-stat-value.requests {
-  color: #3b82f6;
+  color: var(--info);
 }
 
 .usage-filters {
@@ -50,7 +51,7 @@
   padding: 1rem;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .usage-filters label {
@@ -88,12 +89,12 @@
 }
 
 .usage-live.is-live .usage-live-dot {
-  background: #10b981;
+  background: var(--ok);
   animation: usage-live-pulse 2s ease-in-out infinite;
 }
 
 .usage-live.is-down .usage-live-dot {
-  background: #f59e0b;
+  background: var(--warn);
 }
 
 .usage-stat-value.is-updated {
@@ -112,7 +113,7 @@
 
 @keyframes usage-stat-flash {
   from {
-    background-color: rgba(59, 130, 246, 0.18);
+    background-color: var(--accent-muted);
   }
   to {
     background-color: transparent;
@@ -129,7 +130,7 @@
 .usage-chart-container {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 1rem;
   margin-bottom: 1.5rem;
   min-height: 300px;
@@ -143,7 +144,7 @@
 .usage-table-container {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -179,6 +180,12 @@
 .usage-table .text-right {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.usage-empty {
+  padding: 1.5rem 0.75rem;
+  text-align: center;
+  color: var(--text-muted);
 }
 
 .usage-table .font-mono {
@@ -225,23 +232,23 @@
 }
 
 .badge-success {
-  background: rgba(16, 185, 129, 0.15);
-  color: #10b981;
+  background: var(--ok-bg);
+  color: var(--ok);
 }
 
 .badge-warning {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
+  background: var(--warn-bg);
+  color: var(--warn);
 }
 
 .badge-error {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  background: var(--error-bg);
+  color: var(--error);
 }
 
 .badge-gray {
-  background: rgba(156, 163, 175, 0.15);
-  color: #9ca3af;
+  background: var(--neutral-bg);
+  color: var(--neutral);
 }
 
 .section-tabs {

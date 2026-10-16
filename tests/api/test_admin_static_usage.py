@@ -84,6 +84,40 @@ def test_usage_view_polls_for_state_that_has_no_usage_trigger():
     assert "if (!document.hidden)" in usage
 
 
+def test_health_rows_escape_the_episode_and_keep_a_zero_success_rate():
+    """An unescaped cell is an injection hole; 0% is data, not absence."""
+    usage = _read("usage.js")
+    assert "<td>${escapeHtml(p.current_episode)}</td>" in usage
+    assert "${p.current_episode}" not in usage.replace(
+        "<td>${escapeHtml(p.current_episode)}</td>", ""
+    )
+    assert 'p.success_rate === null || p.success_rate === undefined ? "—"' in usage
+
+
+def test_usage_tables_render_an_empty_state_instead_of_no_rows():
+    usage = _read("usage.js")
+    assert "function setRows(tbody, html, columns)" in usage
+    assert 'class="usage-empty">No data in this range.' in usage
+    assert (
+        usage.count("setRows(tbody,") == 6
+    ), "the helper plus all five usage tables"
+
+
+def test_usage_view_reports_a_failed_refresh_instead_of_leaving_stale_data():
+    usage = _read("usage.js")
+    assert "function showError(message)" in usage
+    refresh = usage.split("async function refreshAll()")[1].split("function showError")[0]
+    assert "showError(" in refresh
+
+
+def test_usage_view_keeps_a_banner_element_for_that_error():
+    markup = _read("index.html")
+    assert 'id="usageError"' in markup
+    assert 'role="alert"' in markup.split('<section id="view-usage"', 1)[1].split(
+        '<section id="view-code"', 1
+    )[0]
+
+
 def test_usage_view_updates_the_chart_in_place():
     """Recreating the chart on every commit flickers and leaks animations."""
     usage = _read("usage.js")
