@@ -41,8 +41,13 @@ def test_post_merge_serializes_and_limits_publish_permissions():
     assert verify["permissions"] == {"contents": "read"}
     suite = next(s for s in verify["steps"] if s.get("name") == "Run tests")
     assert "pytest" in suite["run"]
-    for job in (cache, verify, publish):
+    for job in (cache, verify):
         assert job["if"] == "github.ref == 'refs/heads/main'"
+    # Publication is gated on release intent, not merely on being on main.
+    assert publish["if"] == (
+        "github.ref == 'refs/heads/main' && needs.verify.outputs.publishable == 'true'"
+    )
+    for job in (cache, verify, publish):
         checkout = next(
             s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout@")
         )
@@ -51,6 +56,26 @@ def test_post_merge_serializes_and_limits_publish_permissions():
     step = next(s for s in publish["steps"] if s.get("name") == "Publish release")
     assert step["env"]["RELEASE_COMMIT"] == "${{ inputs.release_commit || github.sha }}"
     assert "-m scripts.publish_release" in step["run"]
+
+
+def test_publish_is_gated_on_the_same_predicate_that_publishes():
+    """A non-releasable push must not open a pypi deployment to approve."""
+    config = load("post-merge.yml")
+    verify = config["jobs"]["verify"]
+    assert verify["outputs"] == {"publishable": "${{ steps.release.outputs.publishable }}"}
+
+    step = next(s for s in verify["steps"] if s.get("id") == "release")
+    # Retries target an older commit, so the gate must read the same input.
+    assert step["env"]["RELEASE_COMMIT"] == "${{ inputs.release_commit || github.sha }}"
+    assert "from check_version_policy import changed_paths, release_kind" in step["run"]
+    # release_kind is publish_release's own predicate; a second copy would drift.
+    source = (ROOT / "scripts" / "publish_release.py").read_text(encoding="utf-8")
+    assert "release_kind(title, changed_paths(f\"{target}^\", target))" in source
+
+    # No duplicate of the prefix or release-path rules in the workflow.
+    body = step["run"]
+    for rule in ("patch|minor|major", "RELEASE_DIRS", "RELEASE_FILES"):
+        assert rule not in body
 
 
 def test_title_edits_only_trigger_the_separate_required_check():
