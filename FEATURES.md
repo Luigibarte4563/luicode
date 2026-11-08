@@ -261,19 +261,21 @@ async def my_handler(browser_tools: BrowserToolsPort):
 
 ## Admin UI Features
 
-### Navigation (6 Views)
+### Navigation (7 Views)
 | View | Path | Purpose |
 |------|------|---------|
-| **Providers** | `/admin` | Configure cloud, local, OAuth providers |
+| **Providers & Runtime** | `/admin` | Configure cloud, local, OAuth providers; tune runtime and diagnostics settings (advanced fields behind a disclosure) |
 | **Model Config** | `/admin/model_config` | Select models, reasoning, web tools |
 | **Messaging** | `/admin/messaging` | Discord, Telegram, Voice |
 | **Usage** | `/admin/usage` | Token usage, costs, optimization savings, provider health |
 | **Integrations** | `/admin/integrations` | VS Code, JetBrains, Claude Desktop |
+| **Browser Agent** | `/admin/browser` | Connect and monitor the Jev Ultrafast browser agent |
 | **Code Sessions** | `/admin/code` | Browse, search, manage sessions |
 
 ### Provider Management
 - **Responsive card grid** (260px min, auto-fill columns)
 - **Three sections**: OAuth, Cloud, Local (each with Configured/Not Configured)
+- **Live search filter** — narrows cards and hides the groups/subgroups it empties, with a visible-count indicator
 - **Status pills**: Connected, Not configured, Model count, Checking, Error
 - **Actions**: Configure, Manage, Edit, Test (local), Refresh models
 
@@ -289,6 +291,12 @@ async def my_handler(browser_tools: BrowserToolsPort):
 - **Hot-reload** — Applies without restart when possible
 - **Restart handling** — Auto-reconnect or manual "Reconnect" button
 - **Pending restart banner** — Shows which fields require restart
+
+### Browser Agent
+- **Jev Ultrafast** — Delegate a web task to a browser agent in one tool call
+- **Status panel** — Chrome status, text model, allowed domains, recent browse tasks
+- **Connect / Disconnect** — Same confirm-and-restart flow as the integrations
+- **Stop** — Halt a running browse task from the Admin UI
 
 ---
 
@@ -388,6 +396,8 @@ curl -fsSL "https://raw.githubusercontent.com/Luigibarte4563/luicode/main/script
 | `/admin/api/providers/{id}/auth` | GET | OAuth status |
 | `/admin/api/providers/{id}/auth/login` | POST | Start OAuth |
 | `/admin/api/integrations/*` | GET/POST | Integration status/connect |
+| `/admin/browser` | GET | Browser agent page |
+| `/admin/api/browser/jev/*` | GET/POST | Jev Ultrafast status, connect, disconnect, stop, runs |
 | `/admin/api/models` | GET | Discovered models |
 | `/admin/api/models/refresh` | POST | Refresh models |
 | `/admin/api/code/*` | GET/POST/WS | Code sessions |
