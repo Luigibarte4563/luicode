@@ -98,24 +98,36 @@ def test_usage_tables_render_an_empty_state_instead_of_no_rows():
     usage = _read("usage.js")
     assert "function setRows(tbody, html, columns)" in usage
     assert 'class="usage-empty">No data in this range.' in usage
-    assert (
-        usage.count("setRows(tbody,") == 6
-    ), "the helper plus all five usage tables"
+    assert usage.count("setRows(tbody,") == 6, "the helper plus all five usage tables"
+
+
+def test_empty_state_rows_never_become_filter_options():
+    """The filter dropdowns read the tables, so the empty state must not feed them."""
+    usage = _read("usage.js")
+    collect = usage.split("function collect(tbody, column)")[1].split(
+        "function addOptions", 1
+    )[0]
+    assert 'classList.contains("usage-empty")' in collect
 
 
 def test_usage_view_reports_a_failed_refresh_instead_of_leaving_stale_data():
     usage = _read("usage.js")
     assert "function showError(message)" in usage
-    refresh = usage.split("async function refreshAll()")[1].split("function showError")[0]
+    refresh = usage.split("async function refreshAll()")[1].split("function showError")[
+        0
+    ]
     assert "showError(" in refresh
 
 
 def test_usage_view_keeps_a_banner_element_for_that_error():
     markup = _read("index.html")
     assert 'id="usageError"' in markup
-    assert 'role="alert"' in markup.split('<section id="view-usage"', 1)[1].split(
-        '<section id="view-code"', 1
-    )[0]
+    assert (
+        'role="alert"'
+        in markup.split('<section id="view-usage"', 1)[1].split(
+            '<section id="view-code"', 1
+        )[0]
+    )
 
 
 def test_usage_view_updates_the_chart_in_place():

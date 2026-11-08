@@ -335,7 +335,9 @@
     const values = [];
     for (const row of tbody.rows) {
       const cell = row.cells[column];
-      const text = cell && cell.textContent.trim();
+      // An empty-state cell spans the table; its text is never a filter value.
+      if (!cell || cell.classList.contains("usage-empty")) continue;
+      const text = cell.textContent.trim();
       if (text && text !== "—" && !values.includes(text)) values.push(text);
     }
     return values;

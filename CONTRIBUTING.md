@@ -77,7 +77,7 @@ Changes to runtime code, packaging, dependencies, or install/CI scripts require 
 
 ## Releasing
 
-Merging to `main` publishes to PyPI and GitHub Releases automatically. The workflow needs a PyPI trusted publisher, configured once per repository: owner `Luigibarte4563`, repository `luicode`, workflow `post-merge.yml`, environment `pypi`.
+Merging to `main` publishes to PyPI and GitHub Releases automatically, but only when the commit is releasable: a `patch:` , `minor:` , or `major:` title touching release paths as described under [Version Numbers](#version-numbers). Other merges run the test suite and stop there; they publish nothing. The workflow needs a PyPI trusted publisher, configured once per repository: owner `Luigibarte4563`, repository `luicode`, workflow `post-merge.yml`, environment `pypi`.
 
 Publication runs the test suite on the pushed commit first. `Post merge` runs on the push to `main` itself, while the `CI` workflow runs on pull requests only, so a qualifying push would otherwise publish code whose tests never ran against `main`; the `verify` job closes that gap and `publish` needs it. The `pypi` environment exists to scope the trusted publisher's OIDC identity and currently has no protection rules, so it is an authentication environment rather than an approval gate.
 

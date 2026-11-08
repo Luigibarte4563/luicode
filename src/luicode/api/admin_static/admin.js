@@ -399,25 +399,20 @@ function visibleCards(container) {
   );
 }
 
-function updateSearchCount() {
-  const count = state.config.provider_status.filter((provider) => {
-    const card = document.querySelector(`[data-provider="${provider.provider_id}"]`);
-    return card && !card.hidden;
-  }).length;
-  const total = state.config.provider_status.length;
-  byId("providerSearchCount").textContent = count === total ? "" : `${count} / ${total}`;
-}
-
 function applyProviderSearch() {
+  if (!state.config) return;
   const query = byId("providerSearch").value.trim().toLocaleLowerCase();
+  let visible = 0;
   state.config.provider_status.forEach((provider) => {
     const card = document.querySelector(`[data-provider="${provider.provider_id}"]`);
     if (!card) return;
     card.hidden = !!query && !providerMatches(card, query);
+    if (!card.hidden) visible += 1;
   });
   syncProviderVisibility();
   updateGroupCounts();
-  updateSearchCount();
+  const total = state.config.provider_status.length;
+  byId("providerSearchCount").textContent = visible === total ? "" : `${visible} / ${total}`;
 }
 
 // Hide the subgroups and groups a filter has emptied, so a search never leaves
@@ -1040,12 +1035,15 @@ function renderField(field) {
   if (field.key === "MODEL") {
     // Keep the default-route card honest while the slug is being typed, but
     // only repaint the cards when the provider it names actually changes.
-    input.addEventListener("input", () => {
+    const syncDefaultRoute = () => {
       const previous = defaultProviderId();
       state.fields.set("MODEL", { ...field, value: input.value });
       if (defaultProviderId() === previous) return;
       state.config.provider_status.forEach(updateProviderCard);
-    });
+    };
+    // The model combobox sets the value and fires only "change".
+    input.addEventListener("input", syncDefaultRoute);
+    input.addEventListener("change", syncDefaultRoute);
   }
 
   let control = input;

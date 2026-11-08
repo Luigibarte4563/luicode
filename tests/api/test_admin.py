@@ -646,6 +646,17 @@ def test_admin_static_hides_managed_source_label():
     assert "sourceEl.textContent = text" in script
 
 
+def test_admin_default_route_marker_follows_combobox_selections():
+    """The model combobox fires only "change", so typing alone cannot be watched."""
+    script = Path("src/luicode/api/admin_static/admin.js").read_text(encoding="utf-8")
+    block = script.split('if (field.key === "MODEL")')[1].split("let control = input;")[
+        0
+    ]
+
+    assert 'input.addEventListener("input", syncDefaultRoute)' in block
+    assert 'input.addEventListener("change", syncDefaultRoute)' in block
+
+
 def test_admin_static_places_reasoning_fields_in_model_config():
     script = Path("src/luicode/api/admin_static/admin.js").read_text(encoding="utf-8")
 
