@@ -51,6 +51,10 @@ def test_cli_scripts_are_registered() -> None:
         "luicode-muse": "luicode.cli.launchers.muse:launch",
         "luicode-aider": "luicode.cli.launchers.aider:launch",
         "luicode-jcode": "luicode.cli.launchers.jcode:launch",
+        "luicode-update": "luicode.cli.updater:luicode_update",
+        "luicode-upgrade": "luicode.cli.updater:luicode_upgrade",
+        "luicode-update.cmd": "luicode.cli.updater:luicode_update_cmd",
+        "luicode-upgrade.cmd": "luicode.cli.updater:luicode_upgrade_cmd",
     }
     assert pyproject["project"]["gui-scripts"] == {
         "luicode-desktop": "luicode.cli.desktop_entrypoint:launch",
