@@ -18,7 +18,7 @@ from luicode.core.json_types import JsonValue
 from luicode.providers.runtime.config import string_setting
 
 REQUEST_TIMEOUT = 5.0
-BATCH_TIMEOUT = 10.0
+BATCH_TIMEOUT = 20.0
 MAX_CONCURRENCY = 8
 
 

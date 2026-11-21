@@ -222,10 +222,19 @@ class ModelRouter:
     @staticmethod
     def _matched_route(model_name: str) -> tuple[str, str, str] | None:
         normalized = model_name.lower()
-        return next(
-            (route for route in _ROUTE_SETTINGS if route[0] in normalized),
-            None,
-        )
+        # Match route name as a word boundary: preceded by start/non-alnum, followed by end/non-alnum
+        # e.g., "sonnet" matches "sonnet", "sonnet-3", "claude-sonnet", but not "mysonnetmodel"
+        for route in _ROUTE_SETTINGS:
+            name = route[0]
+            idx = normalized.find(name)
+            while idx != -1:
+                before_ok = idx == 0 or not normalized[idx - 1].isalnum()
+                after_idx = idx + len(name)
+                after_ok = after_idx == len(normalized) or not normalized[after_idx].isalnum()
+                if before_ok and after_ok:
+                    return route
+                idx = normalized.find(name, idx + 1)
+        return None
 
     def resolve_messages_request(
         self, request: MessagesRequest

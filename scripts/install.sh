@@ -2312,6 +2312,11 @@ package_spec() {
     else
         printf 'luicode @ %s' "$archive_url"
     fi
+    # Warn about main-tracking reproducibility
+    if [ "$latest_release" -eq 0 ] && [ "$dry_run" -eq 0 ]; then
+        printf '\nWARNING: Installing from main branch (non-reproducible).\n' >&2
+        printf 'The main branch zip changes over time. For reproducible installs, use --latest-release.\n' >&2
+    fi
 }
 
 install_luicode() {

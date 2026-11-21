@@ -343,26 +343,19 @@ class MessagingWorkflow:
             chat_id=incoming.chat_id,
             node_id=incoming.message_id,
         ):
-            is_standalone_clear = (
-                parse_command_base(incoming.text) == "/clear"
-                and not incoming.is_reply()
-            )
             async with self._state_lock:
                 admission_token = AdmissionToken(
                     stop_generation=self._stop_generation,
                     clear_generation=self._clear_generations.get(incoming.scope, 0),
                 )
-                if not is_standalone_clear:
-                    self._record_incoming_message(incoming)
+                # Record all incoming messages (including standalone /clear) for message log
+                self._record_incoming_message(incoming)
             try:
                 await self.turn_intake.handle_message(
                     incoming,
                     admission_token=admission_token,
                 )
             except BaseException:
-                if is_standalone_clear:
-                    async with self._state_lock:
-                        self._record_incoming_message(incoming)
                 raise
 
     async def resolve_reply(

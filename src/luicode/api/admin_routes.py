@@ -9,8 +9,6 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
-    Request,
-    Response,
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
@@ -79,6 +77,8 @@ LOCAL_PROVIDER_PATHS = {
 _LOCAL_PROVIDER_CHECK_FAILURE_MESSAGE = (
     "Could not connect. Verify the URL and that the local provider is running."
 )
+_LOCAL_PROVIDER_CHECK_TIMEOUT = 5.0
+_LOCAL_PROVIDER_CHECK_RETRIES = 2
 
 
 class AdminConfigPayload(BaseModel):
@@ -230,15 +230,8 @@ async def apply_admin_config(
 
 @router.get("/admin/api/status")
 async def admin_status(
-    request: Request,
-    response: Response,
     services: ApiServices = Depends(get_services),
 ):
-    # A local Admin page may reconnect after Apply changes the listening port.
-    # The existing security check admits only loopback callers and origins.
-    if origin := request.headers.get("origin"):
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Vary"] = "Origin"
     return await services.admin.admin_status()
 
 
@@ -489,30 +482,36 @@ async def _check_local_provider(
         }
 
     url = f"{clean_url}{path}"
-    try:
-        async with httpx.AsyncClient(timeout=1.5) as client:
-            response = await client.get(url)
-        ok = 200 <= response.status_code < 300
-        return {
-            "provider_id": provider_id,
-            "status": "reachable" if ok else "offline",
-            "label": "Reachable" if ok else "Offline",
-            "base_url": base_url,
-            "status_code": response.status_code,
-        }
-    except Exception as exc:
-        logger.debug(
-            "Admin local provider check failed: provider={} exc_type={}",
-            provider_id,
-            type(exc).__name__,
-        )
-        return {
-            "provider_id": provider_id,
-            "status": "offline",
-            "label": "Offline",
-            "base_url": base_url,
-            "message": _LOCAL_PROVIDER_CHECK_FAILURE_MESSAGE,
-        }
+    last_exc: Exception | None = None
+    for attempt in range(_LOCAL_PROVIDER_CHECK_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=_LOCAL_PROVIDER_CHECK_TIMEOUT) as client:
+                response = await client.get(url)
+            ok = 200 <= response.status_code < 300
+            return {
+                "provider_id": provider_id,
+                "status": "reachable" if ok else "offline",
+                "label": "Reachable" if ok else "Offline",
+                "base_url": base_url,
+                "status_code": response.status_code,
+            }
+        except Exception as exc:
+            last_exc = exc
+            if attempt < _LOCAL_PROVIDER_CHECK_RETRIES:
+                await asyncio.sleep(0.5 * (attempt + 1))
+                continue
+    logger.debug(
+        "Admin local provider check failed: provider={} exc_type={}",
+        provider_id,
+        type(last_exc).__name__,
+    )
+    return {
+        "provider_id": provider_id,
+        "status": "offline",
+        "label": "Offline",
+        "base_url": base_url,
+        "message": _LOCAL_PROVIDER_CHECK_FAILURE_MESSAGE,
+    }
 
 
 def _require_connected_account_provider(provider_id: str) -> None:

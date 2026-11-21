@@ -54,10 +54,23 @@ def model_list_provider_ids_for_settings(
 ) -> tuple[str, ...]:
     """Return providers worth discovering for this process configuration."""
     referenced_ids = referenced_provider_ids(settings)
+    # Discover local providers only if they have an explicitly configured
+    # base URL (different from the default) OR are referenced by a model.
+    # Default base URLs don't count as explicit configuration.
+    local_explicit = {
+        provider_id
+        for provider_id, descriptor in PROVIDER_CATALOG.items()
+        if descriptor.local
+        and descriptor.base_url_attr
+        and descriptor.default_base_url
+        and getattr(settings, descriptor.base_url_attr, None) != descriptor.default_base_url
+    }
     return tuple(
         provider_id
         for provider_id in model_cache_provider_ids_for_settings(
             settings, connected_provider_ids
         )
-        if not PROVIDER_CATALOG[provider_id].local or provider_id in referenced_ids
+        if not PROVIDER_CATALOG[provider_id].local
+        or provider_id in referenced_ids
+        or provider_id in local_explicit
     )

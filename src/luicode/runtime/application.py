@@ -594,9 +594,7 @@ class ApplicationRuntime:
             self._check_integration_available()
             settings = self.settings
             try:
-                result = await run_sync_owned(
-                    partial(operations.operate, action, settings, update)
-                )
+                result = await operations.operate(action, settings, update)
             except ApplicationError:
                 raise
             except Exception as error:

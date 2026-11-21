@@ -404,55 +404,6 @@ class ProviderAdmissionController:
     episode instead of starting independent retry loops.
     """
 
-    def __init__(
-        self,
-        *,
-        provider_name: str,
-        rate_limit: int = 40,
-        rate_window: float = 60.0,
-        max_concurrency: int = 5,
-        max_attempts: int = UPSTREAM_TRANSIENT_TOTAL_ATTEMPTS,
-        base_delay: float = DEFAULT_UPSTREAM_BASE_DELAY,
-        max_delay: float = DEFAULT_UPSTREAM_MAX_DELAY,
-        jitter: float = DEFAULT_UPSTREAM_JITTER,
-    ) -> None:
-        if rate_limit <= 0:
-            raise ValueError("rate_limit must be > 0")
-        if rate_window <= 0:
-            raise ValueError("rate_window must be > 0")
-        if max_concurrency <= 0:
-            raise ValueError("max_concurrency must be > 0")
-        if max_attempts <= 0:
-            raise ValueError("max_attempts must be > 0")
-        if base_delay < 0:
-            raise ValueError("base_delay must be >= 0")
-        if max_delay < base_delay:
-            raise ValueError("max_delay must be >= base_delay")
-        if jitter < 0:
-            raise ValueError("jitter must be >= 0")
-
-        self._provider_name = provider_name
-        self._max_attempts = max_attempts
-        self._base_delay = base_delay
-        self._max_delay = max_delay
-        self._jitter = jitter
-        self._proactive_limiter = StrictSlidingWindowLimiter(
-            rate_limit, float(rate_window)
-        )
-        self._concurrency_sem = asyncio.Semaphore(max_concurrency)
-        self._condition = asyncio.Condition()
-        self._episode: _RecoveryEpisode | None = None
-        self._next_generation = 1
-        logger.info(
-            "Provider admission initialized for {} ({} req / {}s, "
-            "max_concurrency={}, max_attempts={})",
-            provider_name,
-            rate_limit,
-            rate_window,
-            max_concurrency,
-            max_attempts,
-        )
-
     def start_execution(
         self,
         *,
@@ -908,42 +859,54 @@ class ProviderAdmissionController:
             return f"Upstream server error ({status})"
         return f"Provider transient error ({type(error).__name__})"
 
-    def health_snapshot(self) -> dict[str, object]:
-        """Return a read-only health snapshot for Admin UI."""
-        episode = self._episode
-        is_healthy = episode is None or episode.terminal_until is None
-        current_episode = "idle"
-        if episode is not None:
-            if episode.terminal_until is not None:
-                current_episode = "quarantined"
-            elif episode.probe_active:
-                current_episode = "probing"
-            else:
-                current_episode = "recovering"
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        rate_limit: int = 40,
+        rate_window: float = 60.0,
+        max_concurrency: int = 5,
+        max_attempts: int = UPSTREAM_TRANSIENT_TOTAL_ATTEMPTS,
+        base_delay: float = DEFAULT_UPSTREAM_BASE_DELAY,
+        max_delay: float = DEFAULT_UPSTREAM_MAX_DELAY,
+        jitter: float = DEFAULT_UPSTREAM_JITTER,
+    ) -> None:
+        if rate_limit <= 0:
+            raise ValueError("rate_limit must be > 0")
+        if rate_window <= 0:
+            raise ValueError("rate_window must be > 0")
+        if max_concurrency <= 0:
+            raise ValueError("max_concurrency must be > 0")
+        if max_attempts <= 0:
+            raise ValueError("max_attempts must be > 0")
+        if base_delay < 0:
+            raise ValueError("base_delay must be >= 0")
+        if max_delay < base_delay:
+            raise ValueError("max_delay must be >= base_delay")
+        if jitter < 0:
+            raise ValueError("jitter must be >= 0")
 
-        # Calculate success rate from recent trace events (simplified)
-        # In a full implementation, this would track actual metrics
-        return {
-            "provider_id": self._provider_name,
-            "display_name": self._provider_name,
-            "is_healthy": is_healthy,
-            "success_rate": 1.0 if is_healthy else 0.0,  # Placeholder
-            "p50_latency_ms": None,
-            "p95_latency_ms": None,
-            "current_episode": current_episode,
-            "last_error": str(episode.last_error)
-            if episode and episode.last_error
-            else None,
-            "last_success_ms": None,
-            "rate_limit_remaining": max(
-                0,
-                self._proactive_limiter._rate_limit
-                - len(self._proactive_limiter._times),
-            ),
-            "rate_limit_reset_ms": None,
-            "concurrency_used": self._max_attempts - self._concurrency_sem._value,
-            "concurrency_limit": self._max_attempts,
-        }
+        self._provider_name = provider_name
+        self._max_attempts = max_attempts
+        self._max_concurrency = max_concurrency
+        self._base_delay = base_delay
+        self._max_delay = max_delay
+        self._jitter = jitter
+        self._proactive_limiter = StrictSlidingWindowLimiter(
+            rate_limit, float(rate_window)
+        )
+        self._concurrency_sem = asyncio.Semaphore(max_concurrency)
+        self._condition = asyncio.Condition()
+        self._episode: _RecoveryEpisode | None = None
+        self._next_generation = 1
+        logger.debug(
+            "Provider admission initialized for {} (rate_limit={}, rate_window={}, max_concurrency={}, max_attempts={})",
+            provider_name,
+            rate_limit,
+            rate_window,
+            max_concurrency,
+            max_attempts,
+        )
 
 
 def _retry_after_seconds(error: Exception) -> float | None:

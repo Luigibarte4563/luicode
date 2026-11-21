@@ -1856,8 +1856,10 @@ def test_admin_restart_status_can_be_read_from_another_local_address(origin):
     app = create_test_app()
     response = _local_client(app).get("/admin/api/status", headers={"Origin": origin})
     assert response.status_code == 200
-    assert response.headers["Access-Control-Allow-Origin"] == origin
-    assert response.headers["Vary"] == "Origin"
+    # The status endpoint is internal-only and does not reflect CORS headers.
+    # The loopback check in require_loopback_admin is the security boundary.
+    assert "Access-Control-Allow-Origin" not in response.headers
+    assert "Vary" not in response.headers
     initial = response.json()
     assert initial["status"] == "running"
     assert isinstance(initial["instance_id"], str) and initial["instance_id"]

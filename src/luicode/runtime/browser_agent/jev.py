@@ -114,52 +114,63 @@ class JevBrowserAgent:
                 started,
             )
 
-        self._apply_environment()
-        agent_module = importlib.import_module(f"{_JEV_MODULE}.agent")
-        agent = None
+        # Save original environment to restore after Jev runs (prevents key leakage)
+        env_keys = ("TYPESAFE_API_KEY", "TEXT_MODEL_API_KEY", "TEXT_MODEL", "JEV_DEDICATED_PROFILE")
+        old_env = {k: os.environ.get(k) for k in env_keys}
         try:
-            agent = agent_module.Agent(task.url, task.goal)
-            steps = 0
-            last = None
-            for last in agent.run():
-                steps += 1
-                if state.cancel.is_set():
-                    return self._finish(
-                        BrowseRunResult(
-                            status=BrowseStatus.ERROR,
-                            final_url=_page_url(last),
-                            title=_page_title(last),
-                            steps=steps,
-                            reason=BrowseReason.CANCELLED,
-                            message="browse_web was cancelled.",
-                        ),
-                        started,
-                    )
-                if steps >= self._max_steps:
-                    return self._finish(
-                        BrowseRunResult(
-                            status=BrowseStatus.TIMEOUT,
-                            final_url=_page_url(last),
-                            title=_page_title(last),
-                            steps=steps,
-                            reason=BrowseReason.TIMEOUT,
-                            message=(
-                                f"browse_web reached its {self._max_steps} step limit."
+            self._apply_environment()
+            agent_module = importlib.import_module(f"{_JEV_MODULE}.agent")
+            agent = None
+            try:
+                agent = agent_module.Agent(task.url, task.goal)
+                steps = 0
+                last = None
+                for last in agent.run():
+                    steps += 1
+                    if state.cancel.is_set():
+                        return self._finish(
+                            BrowseRunResult(
+                                status=BrowseStatus.ERROR,
+                                final_url=_page_url(last),
+                                title=_page_title(last),
+                                steps=steps,
+                                reason=BrowseReason.CANCELLED,
+                                message="browse_web was cancelled.",
                             ),
-                        ),
-                        started,
-                    )
-        except Exception as error:
-            return self._finish(
-                BrowseRunResult(
-                    status=BrowseStatus.ERROR,
-                    reason=_reason_for(error),
-                    message=f"browse_web failed: {type(error).__name__}",
-                ),
-                started,
-            )
+                            started,
+                        )
+                    if steps >= self._max_steps:
+                        return self._finish(
+                            BrowseRunResult(
+                                status=BrowseStatus.TIMEOUT,
+                                final_url=_page_url(last),
+                                title=_page_title(last),
+                                steps=steps,
+                                reason=BrowseReason.TIMEOUT,
+                                message=(
+                                    f"browse_web reached its {self._max_steps} step limit."
+                                ),
+                            ),
+                            started,
+                        )
+            except Exception as error:
+                return self._finish(
+                    BrowseRunResult(
+                        status=BrowseStatus.ERROR,
+                        reason=_reason_for(error),
+                        message=f"browse_web failed: {type(error).__name__}",
+                    ),
+                    started,
+                )
+            finally:
+                _close_quietly(agent)
         finally:
-            _close_quietly(agent)
+            # Restore original environment
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
         status = _status_from(getattr(last, "get", lambda _k: None)("status"))
         text = _page_text(last)

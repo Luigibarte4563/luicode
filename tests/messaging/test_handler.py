@@ -1358,7 +1358,10 @@ async def test_global_clear_command_deletes_returned_ids(
         fire_and_forget=False,
     )
     mock_platform.queue_send_message.assert_not_awaited()
-    handler.session_store.record_message_id.assert_not_called()
+    # The /clear command itself is recorded so a future /clear can delete it.
+    handler.session_store.record_message_id.assert_called_once_with(
+        "telegram", "chat_1", "150", "in", "command"
+    )
 
 
 @pytest.mark.asyncio
@@ -1764,9 +1767,11 @@ async def test_clear_command_cannot_evict_startup_notice_at_managed_message_cap(
 
     await workflow.handle_message(incoming)
 
+    # The /clear command itself is recorded and deleted.
+    # The startup notice at the managed message cap is NOT evicted.
     mock_platform.queue_delete_messages.assert_awaited_once_with(
         _SCOPE.chat_id,
-        ["101", "100"],
+        ["101"],
         fire_and_forget=False,
     )
 

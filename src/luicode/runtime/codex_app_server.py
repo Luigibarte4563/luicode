@@ -1,6 +1,7 @@
 """Owned Codex app-server processes over bidirectional stdio JSONL."""
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -239,8 +240,23 @@ class CodexAppServer:
             async with asyncio.timeout(30):
                 return await asyncio.shield(future)
         except asyncio.CancelledError:
+            # If this was a turn/start, try to interrupt the turn to avoid orphans.
+            if method == "turn/start" and self.thread_id:
+                turn_id = params.get("clientUserMessageId")
+                if isinstance(turn_id, str):
+                    with contextlib.suppress(Exception):
+                        await self._write(
+                            {"method": "turn/interrupt", "params": {"threadId": self.thread_id, "turnId": turn_id}}
+                        )
             raise
         except TimeoutError as exc:
+            if method == "turn/start" and self.thread_id:
+                turn_id = params.get("clientUserMessageId")
+                if isinstance(turn_id, str):
+                    with contextlib.suppress(Exception):
+                        await self._write(
+                            {"method": "turn/interrupt", "params": {"threadId": self.thread_id, "turnId": turn_id}}
+                        )
             raise CodeUnavailableError(
                 "Codex did not acknowledge the request. It was not resent."
             ) from exc

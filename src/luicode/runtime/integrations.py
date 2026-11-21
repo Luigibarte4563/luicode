@@ -10,7 +10,7 @@ writes, which this sync shape does not model.
 """
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -22,6 +22,7 @@ from luicode.application.errors import (
 from luicode.config.paths import claude_desktop_disconnect_path
 from luicode.config.server_urls import local_proxy_root_url
 from luicode.config.settings import Settings
+from luicode.core.async_tasks import run_sync_owned
 from luicode.core.json_types import JsonObject
 from luicode.harnesses import (
     claude_desktop_integration,
@@ -95,7 +96,7 @@ class ErrorResponse:
 
 
 IntegrationOperate = Callable[
-    [IntegrationAction, Settings, IntegrationUpdate], JsonObject
+    [IntegrationAction, Settings, IntegrationUpdate], Awaitable[JsonObject]
 ]
 IntegrationStatusHook = Callable[[JsonObject, IntegrationUpdate], None]
 
@@ -117,7 +118,7 @@ class IntegrationOperations:
         return None
 
 
-def _vscode_operate(
+async def _vscode_operate(
     action: IntegrationAction, settings: Settings, update: IntegrationUpdate
 ) -> JsonObject:
     path = claude_integration.settings_path()
@@ -133,39 +134,47 @@ def _vscode_operate(
     url = local_proxy_root_url(settings)
     if action == "refresh":
         return {
-            "changed": claude_integration.refresh_connected(
-                path, state_path, url, settings.proxy_auth_token
+            "changed": await run_sync_owned(
+                lambda: claude_integration.refresh_connected(
+                    path, state_path, url, settings.proxy_auth_token
+                )
             )
         }
-    return claude_integration.configure(
-        path,
-        state_path,
-        url,
-        settings.proxy_auth_token,
-        None if action == "status" else action == "connect",
+    return await run_sync_owned(
+        lambda: claude_integration.configure(
+            path,
+            state_path,
+            url,
+            settings.proxy_auth_token,
+            None if action == "status" else action == "connect",
+        )
     )
 
 
-def _desktop_operate(
+async def _desktop_operate(
     action: IntegrationAction, settings: Settings, update: IntegrationUpdate
 ) -> JsonObject:
     root = claude_desktop_integration.config_root()
     url = local_proxy_root_url(settings)
     if action == "refresh":
         return {
-            "changed": claude_desktop_integration.refresh_connected(
-                root,
-                url,
-                settings.proxy_auth_token,
-                disconnect_path=claude_desktop_disconnect_path(),
+            "changed": await run_sync_owned(
+                lambda: claude_desktop_integration.refresh_connected(
+                    root,
+                    url,
+                    settings.proxy_auth_token,
+                    disconnect_path=claude_desktop_disconnect_path(),
+                )
             )
         }
-    return claude_desktop_integration.configure(
-        root,
-        url,
-        settings.proxy_auth_token,
-        None if action == "status" else action == "connect",
-        disconnect_path=claude_desktop_disconnect_path(),
+    return await run_sync_owned(
+        lambda: claude_desktop_integration.configure(
+            root,
+            url,
+            settings.proxy_auth_token,
+            None if action == "status" else action == "connect",
+            disconnect_path=claude_desktop_disconnect_path(),
+        )
     )
 
 
@@ -175,7 +184,7 @@ def _desktop_finalize_status(result: JsonObject, update: IntegrationUpdate) -> N
         result["connected"] = None
 
 
-def _jetbrains_operate(
+async def _jetbrains_operate(
     action: IntegrationAction, settings: Settings, update: IntegrationUpdate
 ) -> JsonObject:
     del update  # JetBrains ACP has no starting state to report.
@@ -183,15 +192,19 @@ def _jetbrains_operate(
     url = local_proxy_root_url(settings)
     if action == "refresh":
         return {
-            "changed": jetbrains_acp_integration.refresh_connected(
-                path, url, settings.proxy_auth_token
+            "changed": await run_sync_owned(
+                lambda: jetbrains_acp_integration.refresh_connected(
+                    path, url, settings.proxy_auth_token
+                )
             )
         }
-    return jetbrains_acp_integration.configure(
-        path,
-        url,
-        settings.proxy_auth_token,
-        None if action == "status" else action == "connect",
+    return await run_sync_owned(
+        lambda: jetbrains_acp_integration.configure(
+            path,
+            url,
+            settings.proxy_auth_token,
+            None if action == "status" else action == "connect",
+        )
     )
 
 
